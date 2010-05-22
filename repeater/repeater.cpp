@@ -42,12 +42,9 @@
 
 // MACROS FOR SOCKET COMPATIBILITY
 #ifdef WIN32
-#define CLOSE(a)			closesocket(a)
 #ifndef errno
 #define errno				WSAGetLastError()
 #endif
-#else
-#define CLOSE(a)			close(a)
 #endif
 
 // Defines
@@ -93,8 +90,6 @@ unsigned long Find_viewer_list(repeaterinfo * Viewerstruct);
 void Remove_server_list(unsigned char * code);
 void Remove_viewer_list(unsigned char * code);
 int ParseDisplay(char *display, char *phost, int hostlen, char *pport);
-int ReadExact(int sock, char *buf, int len);
-int WriteExact(int sock, char *buf, int len);
 #ifdef WIN32
 void ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds);
 DWORD WINAPI do_repeater(LPVOID lpParam);
@@ -273,12 +268,12 @@ void Remove_server_list(unsigned char * code)
 			// Try to close the sockets
 			if( Servers[i].server != 0 ) {
 				shutdown(Servers[i].server, 1);
-				CLOSE(Servers[i].server);
+				closesocket( Servers[i].server );
 				Servers[1].server = 0;
 			}
 			if( Servers[i].viewer != 0 ) {
 				shutdown(Servers[i].viewer, 1);
-				CLOSE(Servers[i].viewer);
+				closesocket( Servers[i].viewer );
 				Servers[1].viewer = 0;
 			}
 			debug("Remove_server_list(): Server Removed from list %s\n", code);
@@ -299,12 +294,12 @@ void Remove_viewer_list(unsigned char * code)
 			// Try to close the sockets
 			if( Viewers[i].server != 0 ) {
 				shutdown(Viewers[i].server, 1);
-				CLOSE(Viewers[i].server);
+				closesocket( Viewers[i].server );
 				Viewers[1].server = 0;
 			}
 			if( Viewers[i].viewer != 0 ) {
 				shutdown(Viewers[i].viewer, 1);
-				CLOSE(Viewers[i].viewer);
+				closesocket( Viewers[i].viewer );
 				Viewers[1].viewer = 0;
 			}
 			debug("Remove_viewer_list(): Viewer Removed from list %s\n", code);
@@ -556,7 +551,7 @@ void *server_listen(void *lpParam)
 			// First thing is first: Get the repeater ID...
 			if( ReadExact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
 				debug("server_listen(): Reading Proxy settings error");
-				CLOSE(connection); 
+				closesocket( connection ); 
 				continue;
 			}
 
@@ -564,7 +559,7 @@ void *server_listen(void *lpParam)
 			memset((char *)&server_id, 0, sizeof(server_id));
 			if( ParseDisplay(host_id, phost, MAX_HOST_NAME_LEN, (char *)&server_id) == FALSE ) {
 				debug("server_listen(): Reading Proxy settings error");
-				CLOSE(connection); 
+				closesocket( connection ); 
 				continue;
 			}
 
@@ -572,7 +567,7 @@ void *server_listen(void *lpParam)
 			// Read the Protocol Version
 			if( ReadExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("server_listen(): Reading protocol version error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -582,7 +577,7 @@ void *server_listen(void *lpParam)
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
 			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("server_listen(): Writting protocol version error.\n");
-				CLOSE(connection);
+				closesocket(connection);
 				continue;
 			}
 
@@ -592,13 +587,13 @@ void *server_listen(void *lpParam)
 			//       is the only scheme allowed.
 			if( ReadExact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
 				debug("server_listen(): Reading authentication type error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 			auth_type = Swap32IfLE(auth_type);
 			if( auth_type != rfbNoAuth ) {
 				debug("server_listen(): Invalid authentication scheme.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -612,7 +607,7 @@ void *server_listen(void *lpParam)
 			server_index = Add_server_list(&teststruct);
 			if( server_index > MAX_LIST ) {
 				debug("server_listen(): Add_server_list() unable to allocate a slot.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -686,14 +681,14 @@ void *viewer_listen(void *lpParam)
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
 			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("viewer_listen(): Writting protocol version error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
 			// Read the protocol version the client suggests (Must be 3.3)
 			if( ReadExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("viewer_listen(): Reading protocol version error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -701,7 +696,7 @@ void *viewer_listen(void *lpParam)
 			auth_type = Swap32IfLE(rfbVncAuth);
 			if( WriteExact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
 				debug("viewer_listen(): Writting authentication type error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -709,7 +704,7 @@ void *viewer_listen(void *lpParam)
 			// In order for this to work the challenge must be always the same.
 			if( WriteExact(connection, (char *)&known_challenge, sizeof(known_challenge)) < 0 ) {
 				debug("viewer_listen(): Writting challenge error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -718,7 +713,7 @@ void *viewer_listen(void *lpParam)
 			memset(&challenge_response, 0, sizeof(challenge_response));
 			if( ReadExact(connection, (char *)&challenge_response, sizeof(challenge_response)) < 0 ) {
 				debug("viewer_listen(): Reading challenge response error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -735,14 +730,14 @@ void *viewer_listen(void *lpParam)
 			auth_response = Swap32IfLE(rfbVncAuthOK);
 			if( WriteExact(connection, (char *)&auth_response, sizeof(auth_response)) < 0 ) {
 				debug("viewer_listen(): Writting authentication response error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
 			// Retrieve ClientInit and save it inside the structure.
 			if( ReadExact(connection, (char *)&client_init, sizeof(client_init)) < 0 ) {
 				debug("viewer_listen(): Reading ClientInit message error.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
@@ -757,7 +752,7 @@ void *viewer_listen(void *lpParam)
 			viewer_index = Add_viewer_list(&teststruct);
 			if( viewer_index > MAX_LIST ) {
 				debug("viewer_listen(): Add_viewer_list() unable to allocate a slot.\n");
-				CLOSE(connection);
+				closesocket( connection );
 				continue;
 			}
 
