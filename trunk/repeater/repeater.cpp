@@ -853,6 +853,13 @@ int main(int argc, char **argv)
 	HANDLE hServerThread;
 	HANDLE hViewerThread;
 
+	/* Install a control handler to gracefully exiting the application */
+	if( !SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE ) ) 
+	{ 
+		printf( "\nVNC REPEATER ERROR: The Control Handler could not be installed.\n" ); 
+		return 1;
+	}
+
 	if( WinsockInitialize() == 0 )
 		return 1;
 #else
@@ -863,14 +870,6 @@ int main(int argc, char **argv)
 		    
 	/* Initialize some variables */
 	notstopped = TRUE;
-
-#ifdef WIN32
-	/* Install a control handler to gracefully exiting the application */
-	if( !SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE ) ) 
-	{ 
-		printf( "\nERROR: The Control Handler could not be installed.\n" ); 
-	}
-#endif
 
 	server_thread_params = (listener_thread_params *)malloc(sizeof(listener_thread_params));
 	memset(server_thread_params, 0, sizeof(listener_thread_params));
