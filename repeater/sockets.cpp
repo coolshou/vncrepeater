@@ -106,3 +106,44 @@ CreateListenerSocket(u_short port)
 	return sock;
 }
 
+
+
+int ReadExact(int sock, char *buf, int len)
+{
+	int n;
+
+	while (len > 0) {
+		n = recv(sock, buf, len, 0);
+		if (n > 0) {
+			buf += n;
+			len -= n;
+		} else {
+			return n;
+		}
+	}
+
+	return 1;
+}
+
+
+
+int 
+WriteExact(int sock, char *buf, int len)
+{
+	int n;
+
+	while (len > 0) {
+		n = send(sock, buf, len, 0);
+
+		if (n > 0) {
+			buf += n;
+			len -= n;
+		} else if (n == 0) {
+			error("WriteExact: write returned 0?\n");
+			return -1;
+		} else {
+			return n;
+		}
+	}
+	return 1;
+}
