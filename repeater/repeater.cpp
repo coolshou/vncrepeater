@@ -34,21 +34,11 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h> 
-#ifdef WIN32
-#include <windows.h>
-#include <winsock.h>
-#else
-#include <netdb.h>
-#include <unistd.h> 
-#include <pthreads.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <arpa/inet.h> 
-#include <sys/time.h>
-#endif
 
+#include "sockets.h"
 #include "rfb.h"
 #include "vncauth.h"
+#include "repeater.h"
 
 // MACROS FOR SOCKET COMPATIBILITY
 #ifdef WIN32
@@ -80,19 +70,19 @@ typedef struct _repeaterinfo {
 	CARD8 client_init;
 } repeaterinfo;
 
+typedef struct _listener_thread_params {
+	u_short	port;
+	SOCKET	sock;
+} listener_thread_params;
+
 // Global variables
 int notstopped;
 unsigned char known_challenge[CHALLENGESIZE];
-
-u_short server_port;
 
 repeaterinfo Viewers[MAX_LIST];
 repeaterinfo Servers[MAX_LIST];
 
 // Prototypes
-void debug(const char *fmt, ...);
-void error( const char *fmt, ... );
-void fatal(const char *fmt, ...);
 void report_bytes(char *prefix, char *buf, int len);
 void Clear_server_list();
 void Clear_viewer_list();
@@ -106,12 +96,15 @@ int ParseDisplay(char *display, char *phost, int hostlen, char *pport);
 int ReadExact(int sock, char *buf, int len);
 int WriteExact(int sock, char *buf, int len);
 #ifdef WIN32
+void ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds);
 DWORD WINAPI do_repeater(LPVOID lpParam);
 DWORD WINAPI server_listen(LPVOID lpParam);
+DWORD WINAPI viewer_listen(LPVOID lpParam);
 //DWORD WINAPI timer(LPVOID lpParam);
 #else
 void *do_repeater(void *lpParam) 
 void *server_listen(void *lpParam);
+void *viewer_listen(void *lpParam);
 //void *timer(void *lpParam);
 #endif
 
@@ -571,9 +564,8 @@ DWORD WINAPI server_listen(LPVOID lpParam)
 void *server_listen(void *lpParam) 
 #endif
 {
-	int sock;      /* socket */
+	listener_thread_params *thread_params;
 	int connection;
-	struct sockaddr_in name;
 	struct sockaddr client;
 	int socklen;
 	repeaterinfo teststruct;
@@ -590,40 +582,21 @@ void *server_listen(void *lpParam)
 	pthread_t repeater_thread; 
 #endif
 
-	sock = socket(PF_INET, SOCK_STREAM, 0);
-	if( sock < 0 ) {
-		fatal("server_listen(): socket() failed, errno=%d\n", errno);
+	thread_params = (listener_thread_params *)lpParam;
+	thread_params->sock = CreateListenerSocket( thread_params->port );
+	if ( thread_params->sock == INVALID_SOCKET ) {
 		notstopped = FALSE;
-		return 0;
-	} else
-		debug("server_listen(): socket() initialized.\n");
-
-	name.sin_family = AF_INET;
-	name.sin_port = htons(server_port);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	// Bind the socket to the port
-	if( bind(sock, (struct sockaddr *)&name, sizeof(name)) < 0 ) {
-		fatal("server_listen(): bind() failed, errno=%d\n", errno);
-		notstopped = FALSE;
-		return 0;
-	} else 
-		debug("server_listen(): bind() suceeded to port %i\n", server_port);
-	
-	// Start listening for incoming connections
-	if( listen(sock, 1) < 0 ) {
-		fatal("server_listen(): listen() failed, errno=%d\n", errno);
-		notstopped = FALSE;
-		return 0;
+	} else {
+		debug("Listening for incoming server connections on port %d.\n", thread_params->port);
+		socklen = sizeof(client);
 	}
-	
-	socklen = sizeof(client);
 
 	while( notstopped )
 	{
-		connection = accept(sock, &client, &socklen);
+		connection = accept(thread_params->sock, &client, &socklen);
+		if( notstopped == 0) break;
 		if( connection < 0 ) {
-			debug("main(): accept() failed, errno=%d\n", errno);
+			debug("server_listen(): accept() failed, errno=%d\n", errno);
 		} else {
 			// First thing is first: Get the repeater ID...
 			if( ReadExact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
@@ -674,7 +647,7 @@ void *server_listen(void *lpParam)
 				continue;
 			}
 
-			shutdown(sock, 2);
+			shutdown(thread_params->sock, 2);
 
 			// Prepare the reapeaterinfo structure for the viewer
 			teststruct.server = connection;
@@ -704,16 +677,21 @@ void *server_listen(void *lpParam)
 	}
 
 	notstopped = FALSE;
-	CLOSE(sock);
+	closesocket(thread_params->sock);
 
 	return 0;
 }
 
-int main(int argc, char **argv)
+
+
+#ifdef WIN32
+DWORD WINAPI viewer_listen(LPVOID lpParam)
+#else
+void *viewer_listen(void *lpParam) 
+#endif
 {
-	int sock;      /* socket */
+	listener_thread_params *thread_params;
 	int connection;
-	struct sockaddr_in name;
 	struct sockaddr client;
 	int socklen;
 	repeaterinfo teststruct;
@@ -725,112 +703,41 @@ int main(int argc, char **argv)
 	unsigned char viewer_id[(CHALLENGESIZE * 2) + 1];
 	unsigned long server_index;
 	unsigned long viewer_index;
-	u_short viewer_port = 5900;
 #ifdef WIN32
-	// Winsock
-	WORD	wVersionRequested;
-	WSADATA	wsaData;
-	// Windows Threads
 	DWORD dwThreadId;
-
-	/* Use the MAKEWORD(lowbyte, highbyte) macro declared in Windef.h */
-	wVersionRequested = MAKEWORD(2, 2);
-
-	if( WSAStartup(wVersionRequested, &wsaData) != 0 ) {
-		fatal("main(): WSAStartup failed.\n");
-		return 1;
-	}
-
-	if (LOBYTE(wsaData.wVersion) != 2 || HIBYTE(wsaData.wVersion) != 2) {
-		fatal("main(): Could not find a usable version of Winsock.dll\n");
-		WSACleanup();
-		return 1;
-	}
 #else
-	// POSIX Threads
-	pthread_t server_listen_thread;
 	pthread_t repeater_thread; 
-	// ToDo: Implement timer....
-	//pthread_t timer_thread;
 #endif
-	
-	notstopped = TRUE;
-	// Although it is a static challenge, it is randomlly generated when the repeater is launched
-	vncRandomBytes((unsigned char *)&known_challenge);
 
-	Clear_server_list();
-	Clear_viewer_list();
-
-	server_port = 5500;
-
-	sock = socket(PF_INET, SOCK_STREAM, 0);
-	if( sock < 0 ) {
-		fatal("main(): socket() failed, errno=%d\n", errno);
-#ifdef WIN32
-		WSACleanup();
-#endif
-		return 1;
-	} else
-		debug("main(): socket() initialized.\n");
-
-	name.sin_family = AF_INET;
-	name.sin_port = htons(viewer_port);
-	name.sin_addr.s_addr = htonl(INADDR_ANY);
-
-	// Bind the socket to the port
-	if( bind(sock, (struct sockaddr *)&name, sizeof(name)) < 0 ) {
-		fatal("main(): bind() failed, errno=%d\n", errno);
-#ifdef WIN32
-		WSACleanup();
-#endif
-		return 1;
-	} else 
-		debug("main(): bind() suceeded to port %i\n", viewer_port);
-	
-	// Start listening for incoming connections
-	if( listen(sock, 1) < 0 ) {
-		fatal("main(): listen() failed, errno=%d\n", errno);
-#ifdef WIN32
-		WSACleanup();
-#endif
-		return 1;
+	thread_params = (listener_thread_params *)lpParam;
+	thread_params->sock = CreateListenerSocket( thread_params->port );
+	if ( thread_params->sock == INVALID_SOCKET ) {
+		notstopped = FALSE;
+	} else {
+		debug("Listening for incoming viewer connections on port %d.\n", thread_params->port);
+		socklen = sizeof(client);
 	}
-	
-	socklen = sizeof(client);
-
-	// Start multithreading...
-#ifdef WIN32
-	CreateThread(NULL, 0, server_listen, (LPVOID)&teststruct, 0, &dwThreadId);
-	// ToDo: Implement timer....
-	//CreateThread(NULL, 0, timer, (LPVOID)&teststruct, 0, &dwThreadId);
-#else
-	pthread_create(&server_listen_thread, NULL, server_listen, (void *)&teststruct);
-	// ToDo: Implement timer....
-	//pthread_create(&timer_thread, NULL, timer, (void *) &teststruct); 
-#endif
 
 	// Main loop
 	while( notstopped )
 	{
-		debug("main(): Waiting for viewer connection...\n");
-		connection = accept(sock, &client, &socklen);
+		connection = accept(thread_params->sock, &client, &socklen);
+		if( notstopped == 0) break;
 		if( connection < 0 ) {
-			debug("main(): accept() failed, errno=%d\n", errno);
+			debug("viewer_listen(): accept() failed, errno=%d\n", errno);
 		} else {
-			debug("main(): accept() connection.\n");
-
 			// Act like a server until the authentication phase is over.
 			// Send the protocol version.
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
 			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
-				debug("main(): Writting protocol version error.\n");
+				debug("viewer_listen(): Writting protocol version error.\n");
 				CLOSE(connection);
 				continue;
 			}
 
 			// Read the protocol version the client suggests (Must be 3.3)
 			if( ReadExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
-				debug("main(): Reading protocol version error.\n");
+				debug("viewer_listen(): Reading protocol version error.\n");
 				CLOSE(connection);
 				continue;
 			}
@@ -838,7 +745,7 @@ int main(int argc, char **argv)
 			// Send Authentication Type (VNC Authentication to keep it standard)
 			auth_type = Swap32IfLE(rfbVncAuth);
 			if( WriteExact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
-				debug("main(): Writting authentication type error.\n");
+				debug("viewer_listen(): Writting authentication type error.\n");
 				CLOSE(connection);
 				continue;
 			}
@@ -846,7 +753,7 @@ int main(int argc, char **argv)
 			// We must send the 16 bytes challenge key.
 			// In order for this to work the challenge must be always the same.
 			if( WriteExact(connection, (char *)&known_challenge, sizeof(known_challenge)) < 0 ) {
-				debug("main(): Writting challenge error.\n");
+				debug("viewer_listen(): Writting challenge error.\n");
 				CLOSE(connection);
 				continue;
 			}
@@ -855,7 +762,7 @@ int main(int argc, char **argv)
 			// It will be treated as the repeater IDentifier.
 			memset(&challenge_response, 0, sizeof(challenge_response));
 			if( ReadExact(connection, (char *)&challenge_response, sizeof(challenge_response)) < 0 ) {
-				debug("main(): Reading challenge response error.\n");
+				debug("viewer_listen(): Reading challenge response error.\n");
 				CLOSE(connection);
 				continue;
 			}
@@ -872,19 +779,19 @@ int main(int argc, char **argv)
 			// Send Authentication response
 			auth_response = Swap32IfLE(rfbVncAuthOK);
 			if( WriteExact(connection, (char *)&auth_response, sizeof(auth_response)) < 0 ) {
-				debug("main(): Writting authentication response error.\n");
+				debug("viewer_listen(): Writting authentication response error.\n");
 				CLOSE(connection);
 				continue;
 			}
 
 			// Retrieve ClientInit and save it inside the structure.
 			if( ReadExact(connection, (char *)&client_init, sizeof(client_init)) < 0 ) {
-				debug("main(): Reading ClientInit message error.\n");
+				debug("viewer_listen(): Reading ClientInit message error.\n");
 				CLOSE(connection);
 				continue;
 			}
 
-			shutdown(sock, 2);
+			shutdown(thread_params->sock, 2);
 
 			// Prepare the reapeaterinfo structure for the viewer
 			teststruct.viewer = connection;
@@ -894,7 +801,7 @@ int main(int argc, char **argv)
 			
 			viewer_index = Add_viewer_list(&teststruct);
 			if( viewer_index > MAX_LIST ) {
-				debug("main(): Add_viewer_list() unable to allocate a slot.\n");
+				debug("viewer_listen(): Add_viewer_list() unable to allocate a slot.\n");
 				CLOSE(connection);
 				continue;
 			}
@@ -915,11 +822,170 @@ int main(int argc, char **argv)
 	}
 
 	notstopped = FALSE;
-	debug("main(): relaying done.\n");
-	CLOSE(sock);
+	closesocket( thread_params->sock );
+	return 0;
+}
+
+
 
 #ifdef WIN32
-	WSACleanup();
+
+void
+ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds)
+{
+	/* Wait for the threads to complete... */
+	switch( WaitForSingleObject(hThread, 10000) )
+	{
+		case WAIT_OBJECT_0 :
+			/* Thread exited */
+			CloseHandle( hThread );
+			break;
+		case WAIT_TIMEOUT :
+			/* Timeout elapsed, thread still running */
+			TerminateThread( hThread, 0 );
+			CloseHandle( hThread );
+#ifdef _DEBUG
+			error("Thread timed out (Please check what could be wrong).\n");
 #endif
+			break;
+#ifdef _DEBUG
+		default:
+			error("Something went REALLY wrong while waiting for a thread to complete!\n");
+#endif
+	};
+}
+
+
+
+BOOL CtrlHandler( DWORD fdwCtrlType ) 
+{ 
+	switch( fdwCtrlType ) 
+	{ 
+		/* Handle the CTRL-C signal. */
+		case CTRL_C_EVENT: 
+			notstopped = FALSE;
+			return( TRUE );
+ 
+		/* CTRL-CLOSE: confirm that the user wants to exit. */
+		case CTRL_CLOSE_EVENT: 
+			notstopped = FALSE;
+			return( TRUE ); 
+ 
+		/* Pass other signals to the next handler. */
+		case CTRL_BREAK_EVENT: 
+			return FALSE; 
+ 
+		case CTRL_LOGOFF_EVENT: 
+			notstopped = FALSE;
+			return FALSE; 
+ 
+		case CTRL_SHUTDOWN_EVENT: 
+			notstopped = FALSE;
+			return FALSE; 
+ 
+		default: 
+			return FALSE; 
+	} 
+} 
+
+#endif
+
+
+
+int main(int argc, char **argv)
+{
+	listener_thread_params *server_thread_params;
+	listener_thread_params *viewer_thread_params;
+
+#ifdef WIN32
+	// Windows Threads
+	DWORD dwThreadId;
+	HANDLE hServerThread;
+	HANDLE hViewerThread;
+
+	if( WinsockInitialize() == 0 )
+		return 1;
+#else
+	// POSIX Threads
+#endif
+	
+	printf("VNC Repeater - http://code.google.com/p/vncrepeater\n===================================================\n\n");
+		    
+	/* Initialize some variables */
+	notstopped = TRUE;
+
+#ifdef WIN32
+	/* Install a control handler to gracefully exiting the application */
+	if( !SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE ) ) 
+	{ 
+		printf( "\nERROR: The Control Handler could not be installed.\n" ); 
+	}
+#endif
+
+	server_thread_params = (listener_thread_params *)malloc(sizeof(listener_thread_params));
+	memset(server_thread_params, 0, sizeof(listener_thread_params));
+	viewer_thread_params = (listener_thread_params *)malloc(sizeof(listener_thread_params));
+	memset(viewer_thread_params, 0, sizeof(listener_thread_params));
+
+	server_thread_params->port = 5500;
+	viewer_thread_params->port = 5900;
+
+	// Although it is a static challenge, it is randomlly generated when the repeater is launched
+	vncRandomBytes((unsigned char *)&known_challenge);
+
+	Clear_server_list();
+	Clear_viewer_list();
+
+	// Start multithreading...
+#ifdef WIN32
+
+	if( notstopped ) {
+		hServerThread = CreateThread(NULL, 0, server_listen, (LPVOID)server_thread_params, 0, &dwThreadId);
+		if( hServerThread == NULL ) {
+			error("Unable to create the thread to listen for servers.\n");
+			notstopped = 0;
+		}
+	}
+
+	if( notstopped ) {
+		hViewerThread = CreateThread(NULL, 0, viewer_listen, (LPVOID)viewer_thread_params, 0, &dwThreadId);
+		if( hServerThread == NULL ) {
+			error("Unable to create the thread to listen for servers.\n");
+			notstopped = 0;
+		}
+	}
+
+	// ToDo: Implement timer....
+	//CreateThread(NULL, 0, timer, (LPVOID)&teststruct, 0, &dwThreadId);
+#else
+	// POSIX THREADS
+#endif
+
+	// Main loop
+	while( notstopped ) { }
+
+	printf("\nExiting VNC Repeater...\n");
+
+	notstopped = FALSE;
+
+	/* Close the sockets used for the listeners */
+	closesocket( server_thread_params->sock );
+	closesocket( viewer_thread_params->sock );
+	
+	/* Free allocated memory for the thread parameters */
+	free( server_thread_params );
+	free( viewer_thread_params );
+
+	/* Make sure the threads have finalized */
+#ifdef WIN32
+	ThreadCleanup( hServerThread, 10000 );
+	ThreadCleanup( hViewerThread, 10000 );
+
+	// Cleanup Winsock.
+	WinsockFinalize();
+#else
+	// CLEANUP POSIX THREADS
+#endif
+
 	return 0;
 }
