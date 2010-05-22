@@ -544,9 +544,10 @@ void *server_listen(void *lpParam)
 	while( notstopped )
 	{
 		connection = accept(thread_params->sock, &client, &socklen);
-		if( notstopped == 0) break;
+	
 		if( connection < 0 ) {
-			debug("server_listen(): accept() failed, errno=%d\n", errno);
+			if( notstopped )
+				debug("server_listen(): accept() failed, errno=%d\n", errno);
 		} else {
 			// First thing is first: Get the repeater ID...
 			if( ReadExact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
@@ -674,7 +675,8 @@ void *viewer_listen(void *lpParam)
 		connection = accept(thread_params->sock, &client, &socklen);
 		if( notstopped == 0) break;
 		if( connection < 0 ) {
-			debug("viewer_listen(): accept() failed, errno=%d\n", errno);
+			if( notstopped )
+				debug("viewer_listen(): accept() failed, errno=%d\n", errno);
 		} else {
 			// Act like a server until the authentication phase is over.
 			// Send the protocol version.
