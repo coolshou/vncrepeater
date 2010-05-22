@@ -121,11 +121,11 @@ void debug(const char *fmt, ...)
 
 void error( const char *fmt, ... )
 {
-    va_list args;
-    va_start( args, fmt );
-    fprintf(stderr, "ERROR: ");
-    vfprintf( stderr, fmt, args );
-    va_end( args );
+	va_list args;
+	va_start( args, fmt );
+	fprintf(stderr, "ERROR: ");
+	vfprintf( stderr, fmt, args );
+	va_end( args );
 }
 
 void fatal(const char *fmt, ...)
@@ -347,52 +347,7 @@ int ParseDisplay(char *display, char *phost, int hostlen, char *pport)
 	return TRUE;
 }
 
-int ReadExact(int sock, char *buf, int len)
-{
-	int n;
 
-	while (len > 0) {
-		n = recv(sock, buf, len, 0);
-		if (n > 0) {
-			buf += n;
-			len -= n;
-		} else {
-			return n;
-		}
-	}
-
-	return 1;
-}
-
-int WriteExact(int sock, char *buf, int len)
-{
-	int n;
-
-	while (len > 0) {
-		n = send(sock, buf, len, 0);
-
-		if (n > 0) {
-			buf += n;
-			len -= n;
-		} else if (n == 0) {
-			fprintf(stderr, "WriteExact: write returned 0?\n");
-			exit(1);
-		} else {
-			return n;
-		}
-	}
-	return 1;
-} 
-
-//#ifdef WIN32
-//DWORD WINAPI timer(LPVOID lpParam)
-//#else
-//void *timer(void *lpParam) 
-//#endif
-//{
-//	
-//	return 0;
-//}
 
 #ifdef WIN32
 DWORD WINAPI do_repeater(LPVOID lpParam)
@@ -428,7 +383,7 @@ void *do_repeater(void *lpParam)
 	memset(code, 0, sizeof(code));
 	memcpy((char *)&code, inout->code, sizeof(inout->code));
 	viewerbuf_len = 0;
-    serverbuf_len = 0; 
+	serverbuf_len = 0; 
 
 	debug("do_reapeater(): Starting repeater for ID %s.\n", code);
 
@@ -441,11 +396,11 @@ void *do_repeater(void *lpParam)
 	}
 
 	/* repeater between stdin/out and socket  */
-    nfds = ((viewer < server) ? server : viewer) + 1;
-    ifds = FD_ALLOC(nfds);
-    ofds = FD_ALLOC(nfds);
+	nfds = ((viewer < server) ? server : viewer) + 1;
+	ifds = FD_ALLOC(nfds);
+	ofds = FD_ALLOC(nfds);
 	f_viewer = 1;              /* yes, read from viewer */
-    f_server = 1;              /* yes, read from server */
+	f_server = 1;              /* yes, read from server */
 	tmo = NULL;
 
 	// Start the repeater loop.
@@ -467,12 +422,12 @@ void *do_repeater(void *lpParam)
 
 		//if( select(nfds, ifds, ofds, NULL, tmo) == -1 ) {
 		if( select(nfds, ifds, ofds, NULL, NULL) == -1 ) {
-            /* some error */
-            error("do_repeater(): select() failed, errno=%d\n", errno);
-            Remove_server_list(code);
-            Remove_viewer_list(code);
-            return 0;
-        }
+			/* some error */
+			error("do_repeater(): select() failed, errno=%d\n", errno);
+			Remove_server_list(code);
+			Remove_viewer_list(code);
+			return 0;
+		}
 
 		/* server => viewer */ 
 		if (FD_ISSET(server, ifds) && (serverbuf_len < sizeof(serverbuf))) { 
