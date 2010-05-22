@@ -59,7 +59,7 @@ WinsockFinalize( void )
 	WSACleanup();
 }
 
-#endif /* END WIN32
+#endif /* END WIN32 */
 
 
 
