@@ -181,6 +181,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\sockets.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\vncauth.cpp"
 				>
 			</File>
@@ -195,11 +199,19 @@
 				>
 			</File>
 			<File
+				RelativePath=".\repeater.h"
+				>
+			</File>
+			<File
 				RelativePath=".\rfb.h"
 				>
 			</File>
 			<File
 				RelativePath=".\rfbproto.h"
+				>
+			</File>
+			<File
+				RelativePath=".\sockets.h"
 				>
 			</File>
 			<File
