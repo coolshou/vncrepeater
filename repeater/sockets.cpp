@@ -77,7 +77,9 @@ CreateListenerSocket(u_short port)
 	struct sockaddr_in	addr;
 	int one = 1;
 
-	addr.sin_family = AF_INET;
+	/* zero the struct before filling the fields */
+	memset(&addr, 0, sizeof(struct sockaddr_in));
+	addr.sin_family = AF_INET;					
 	addr.sin_port = htons(port);
 	addr.sin_addr.s_addr = INADDR_ANY;
 
@@ -89,7 +91,7 @@ CreateListenerSocket(u_short port)
 	}
 
 	/* Bind the socket to the port */
-	if( bind(sock, (struct sockaddr *)&addr, sizeof(addr)) < 0 ) {
+	if( bind(sock, (struct sockaddr *)&addr, sizeof(struct sockaddr)) < 0 ) {
 		error("Failed to bind socket on port %d.\n", port);
 		closesocket(sock);
 		return INVALID_SOCKET;
