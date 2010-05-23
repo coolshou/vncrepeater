@@ -22,4 +22,4 @@
 void debug(const char *fmt, ...);
 void error( const char *fmt, ...);
 void fatal(const char *fmt, ...);
-
+void report_bytes(char *prefix, char *buf, int len);
