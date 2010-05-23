@@ -95,12 +95,10 @@ void ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds);
 DWORD WINAPI do_repeater(LPVOID lpParam);
 DWORD WINAPI server_listen(LPVOID lpParam);
 DWORD WINAPI viewer_listen(LPVOID lpParam);
-//DWORD WINAPI timer(LPVOID lpParam);
 #else
 void *do_repeater(void *lpParam) 
 void *server_listen(void *lpParam);
 void *viewer_listen(void *lpParam);
-//void *timer(void *lpParam);
 #endif
 
 /*************************************************************/
@@ -156,9 +154,11 @@ void Clear_viewer_list()
 		Viewers[i].timestamp = 0;
 		Viewers[i].server = 0;
 		Viewers[i].viewer = 0;
-		Servers[i].client_init = 1;
+		Viewers[i].client_init = 1;
 	}
 }
+
+
 
 void report_bytes(char *prefix, char *buf, int len)
 {
@@ -905,9 +905,6 @@ int main(int argc, char **argv)
 			notstopped = 0;
 		}
 	}
-
-	// ToDo: Implement timer....
-	//CreateThread(NULL, 0, timer, (LPVOID)&teststruct, 0, &dwThreadId);
 #else
 	// POSIX THREADS
 #endif
