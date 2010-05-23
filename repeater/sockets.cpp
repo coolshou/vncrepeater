@@ -110,7 +110,8 @@ CreateListenerSocket(u_short port)
 
 
 
-int ReadExact(int sock, char *buf, int len)
+int 
+ReadExact(int sock, char *buf, int len)
 {
 	int n;
 
