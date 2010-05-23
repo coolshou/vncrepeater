@@ -80,7 +80,6 @@ repeaterinfo Viewers[MAX_LIST];
 repeaterinfo Servers[MAX_LIST];
 
 // Prototypes
-void report_bytes(char *prefix, char *buf, int len);
 void Clear_server_list();
 void Clear_viewer_list();
 unsigned long Add_server_list(repeaterinfo * Viewerstruct);
