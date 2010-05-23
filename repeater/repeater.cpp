@@ -101,7 +101,12 @@ void *server_listen(void *lpParam);
 void *viewer_listen(void *lpParam);
 #endif
 
-/*************************************************************/
+
+/*****************************************************************************
+ *
+ * Output methods
+ *
+ *****************************************************************************/
 
 void debug(const char *fmt, ...)
 {
@@ -112,6 +117,8 @@ void debug(const char *fmt, ...)
 	va_end(args);
 }
 
+
+
 void error( const char *fmt, ... )
 {
 	va_list args;
@@ -121,6 +128,8 @@ void error( const char *fmt, ... )
 	va_end( args );
 }
 
+
+
 void fatal(const char *fmt, ...)
 {
 	va_list args;
@@ -128,34 +137,6 @@ void fatal(const char *fmt, ...)
 	fprintf(stderr, "FATAL: ");
 	vfprintf(stderr, fmt, args);
 	va_end(args);
-}
-
-void Clear_server_list()
-{
-	int i;
-	for( i=0; i<MAX_LIST; i++ )
-	{
-		memset(&Servers[i].code, 0, sizeof(Servers[i].code));
-		Servers[i].used = FALSE;
-		Servers[i].timestamp = 0;
-		Servers[i].server = 0;
-		Servers[i].viewer = 0;
-		Servers[i].client_init = 1;
-	}
-}
-
-void Clear_viewer_list()
-{
-	int i;
-	for( i=0; i<MAX_LIST; i++ )
-	{
-		memset(&Viewers[i].code, 0, sizeof(Viewers[i].code));
-		Viewers[i].used = FALSE;
-		Viewers[i].timestamp = 0;
-		Viewers[i].server = 0;
-		Viewers[i].viewer = 0;
-		Viewers[i].client_init = 1;
-	}
 }
 
 
@@ -172,6 +153,45 @@ void report_bytes(char *prefix, char *buf, int len)
 	fprintf(stderr, "\n");
 	return;
 }
+
+
+/*****************************************************************************
+ *
+ * List management
+ *
+ *****************************************************************************/
+
+void Clear_server_list()
+{
+	int i;
+	for( i=0; i<MAX_LIST; i++ )
+	{
+		memset(&Servers[i].code, 0, sizeof(Servers[i].code));
+		Servers[i].used = FALSE;
+		Servers[i].timestamp = 0;
+		Servers[i].server = 0;
+		Servers[i].viewer = 0;
+		Servers[i].client_init = 1;
+	}
+}
+
+
+
+void Clear_viewer_list()
+{
+	int i;
+	for( i=0; i<MAX_LIST; i++ )
+	{
+		memset(&Viewers[i].code, 0, sizeof(Viewers[i].code));
+		Viewers[i].used = FALSE;
+		Viewers[i].timestamp = 0;
+		Viewers[i].server = 0;
+		Viewers[i].viewer = 0;
+		Viewers[i].client_init = 1;
+	}
+}
+
+
 
 unsigned long Add_server_list(repeaterinfo * Viewerstruct) 
 {
@@ -308,6 +328,14 @@ void Remove_viewer_list(unsigned char * code)
 	}
 }
 
+
+
+/*****************************************************************************
+ *
+ * Helpers / Misc.
+ *
+ *****************************************************************************/
+
 int ParseDisplay(char *display, char *phost, int hostlen, char *pport) 
 {
 	unsigned char challenge[CHALLENGESIZE];
@@ -343,6 +371,11 @@ int ParseDisplay(char *display, char *phost, int hostlen, char *pport)
 }
 
 
+/*****************************************************************************
+ *
+ * Threads
+ *
+ *****************************************************************************/
 
 #ifdef WIN32
 DWORD WINAPI do_repeater(LPVOID lpParam)
@@ -843,6 +876,12 @@ BOOL CtrlHandler( DWORD fdwCtrlType )
 #endif
 
 
+
+/*****************************************************************************
+ *
+ * Main entry point
+ *
+ *****************************************************************************/
 
 int main(int argc, char **argv)
 {
