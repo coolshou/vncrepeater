@@ -59,8 +59,8 @@
 
 // Structures
 typedef struct _repeaterinfo {
-	int server;
-	int viewer;
+	SOCKET server;
+	SOCKET viewer;
 	unsigned long timestamp;
 	int used;
 	unsigned char code[(CHALLENGESIZE*2)+1];
