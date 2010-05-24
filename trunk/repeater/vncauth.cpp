@@ -33,7 +33,11 @@
 #include <time.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#ifdef WIN32
 #include <process.h>
+#else
+#include <unistd.h>
+#endif
 #include "vncauth.h"
 #include "d3des.h"
 
@@ -98,7 +102,11 @@ void
 vncRandomBytes(unsigned char *where) {
   int i;
   static unsigned int seed;
+#ifdef WIN32
   seed += (unsigned int) time(0) + _getpid() + _getpid() * 987654;
+#else
+  seed += (unsigned int) time(0) + getpid() + getpid() * 987654;
+#endif
 
   srand(seed);
   for (i=0; i < CHALLENGESIZE; i++) {

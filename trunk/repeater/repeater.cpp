@@ -95,7 +95,7 @@ DWORD WINAPI do_repeater(LPVOID lpParam);
 DWORD WINAPI server_listen(LPVOID lpParam);
 DWORD WINAPI viewer_listen(LPVOID lpParam);
 #else
-void *do_repeater(void *lpParam) 
+void *do_repeater(void *lpParam);
 void *server_listen(void *lpParam);
 void *viewer_listen(void *lpParam);
 #endif
@@ -549,7 +549,7 @@ void *server_listen(void *lpParam)
 	listener_thread_params *thread_params;
 	int connection;
 	struct sockaddr client;
-	int socklen;
+	socklen_t socklen;
 	repeaterinfo teststruct;
 	rfbProtocolVersionMsg protocol_version; 
 	unsigned long server_index;
@@ -676,7 +676,7 @@ void *viewer_listen(void *lpParam)
 	listener_thread_params *thread_params;
 	int connection;
 	struct sockaddr client;
-	int socklen;
+	socklen_t socklen;
 	repeaterinfo teststruct;
 	rfbProtocolVersionMsg protocol_version; 
 	CARD32 auth_type;
