@@ -50,6 +50,10 @@
 #define SOCKET_ERROR -1
 #endif
 
+#ifndef errno
+#define errno				WSAGetLastError()
+#endif
+
 #ifndef WIN32
 #define closesocket(s) close(s)
 #endif
@@ -57,6 +61,7 @@
 #ifdef WIN32
 typedef int socklen_t;
 #endif
+
 
 
 /*****************************************************************************
