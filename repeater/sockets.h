@@ -23,9 +23,9 @@
 #include <windows.h>
 #include <winsock.h>
 #else
+#include <strings.h>
 #include <netdb.h>
 #include <unistd.h> 
-#include <pthreads.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h> 
@@ -52,6 +52,10 @@
 
 #ifndef WIN32
 #define closesocket(s) close(s)
+#endif
+
+#ifdef WIN32
+typedef int socklen_t;
 #endif
 
 
