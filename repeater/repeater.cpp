@@ -85,6 +85,7 @@ unsigned long Find_viewer_list(repeaterinfo * Viewerstruct);
 void Remove_server_list(unsigned char * code);
 void Remove_viewer_list(unsigned char * code);
 int ParseDisplay(char *display, char *phost, int hostlen, char *pport);
+void ExitRepeater(int sig);
 #ifdef WIN32
 void ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds);
 DWORD WINAPI do_repeater(LPVOID lpParam);
@@ -836,40 +837,15 @@ ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds)
 	};
 }
 
-
-
-BOOL CtrlHandler( DWORD fdwCtrlType ) 
-{ 
-	switch( fdwCtrlType ) 
-	{ 
-		/* Handle the CTRL-C signal. */
-		case CTRL_C_EVENT: 
-			notstopped = FALSE;
-			return( TRUE );
- 
-		/* CTRL-CLOSE: confirm that the user wants to exit. */
-		case CTRL_CLOSE_EVENT: 
-			notstopped = FALSE;
-			return( TRUE ); 
- 
-		/* Pass other signals to the next handler. */
-		case CTRL_BREAK_EVENT: 
-			return FALSE; 
- 
-		case CTRL_LOGOFF_EVENT: 
-			notstopped = FALSE;
-			return FALSE; 
- 
-		case CTRL_SHUTDOWN_EVENT: 
-			notstopped = FALSE;
-			return FALSE; 
- 
-		default: 
-			return FALSE; 
-	} 
-} 
-
 #endif
+
+
+
+void 
+ExitRepeater(int sig)
+{
+	notstopped = FALSE;
+}
 
 
 
@@ -890,13 +866,6 @@ int main(int argc, char **argv)
 	HANDLE hServerThread;
 	HANDLE hViewerThread;
 
-	/* Install a control handler to gracefully exiting the application */
-	if( !SetConsoleCtrlHandler( (PHANDLER_ROUTINE) CtrlHandler, TRUE ) ) 
-	{ 
-		printf( "\nVNC REPEATER ERROR: The Control Handler could not be installed.\n" ); 
-		return 1;
-	}
-
 	if( WinsockInitialize() == 0 )
 		return 1;
 #else
@@ -909,6 +878,9 @@ int main(int argc, char **argv)
 		    
 	/* Initialize some variables */
 	notstopped = TRUE;
+
+	/* Trap signal in order to exit cleanlly */
+	signal(SIGINT, ExitRepeater);
 
 	server_thread_params = (listener_thread_params *)malloc(sizeof(listener_thread_params));
 	memset(server_thread_params, 0, sizeof(listener_thread_params));
