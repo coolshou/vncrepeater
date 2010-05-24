@@ -34,18 +34,14 @@
 #include <signal.h>
 #include <time.h>
 #include <sys/stat.h> 
+#ifndef WIN32
+#include <pthread.h>
+#endif
 
 #include "sockets.h"
 #include "rfb.h"
 #include "vncauth.h"
 #include "repeater.h"
-
-// MACROS FOR SOCKET COMPATIBILITY
-#ifdef WIN32
-#ifndef errno
-#define errno				WSAGetLastError()
-#endif
-#endif
 
 // Defines
 #define TRUE	1
@@ -630,7 +626,8 @@ void *server_listen(void *lpParam)
 				continue;
 			}
 
-			shutdown(thread_params->sock, 2);
+			// Screws LINUX!
+			// shutdown(thread_params->sock, 2);
 
 			// Prepare the reapeaterinfo structure for the viewer
 			teststruct.server = connection;
@@ -705,7 +702,6 @@ void *viewer_listen(void *lpParam)
 	while( notstopped )
 	{
 		connection = accept(thread_params->sock, &client, &socklen);
-		if( notstopped == 0) break;
 		if( connection < 0 ) {
 			if( notstopped )
 				debug("viewer_listen(): accept() failed, errno=%d\n", errno);
@@ -775,7 +771,8 @@ void *viewer_listen(void *lpParam)
 				continue;
 			}
 
-			shutdown(thread_params->sock, 2);
+			// Screws LINUX!
+			//shutdown(thread_params->sock, 2);
 
 			// Prepare the reapeaterinfo structure for the viewer
 			teststruct.viewer = connection;
@@ -904,6 +901,8 @@ int main(int argc, char **argv)
 		return 1;
 #else
 	// POSIX Threads
+	pthread_t hServerThread;
+	pthread_t hViewerThread;
 #endif
 	
 	printf("VNC Repeater - http://code.google.com/p/vncrepeater\n===================================================\n\n");
@@ -945,6 +944,13 @@ int main(int argc, char **argv)
 	}
 #else
 	// POSIX THREADS
+	if( notstopped ) {
+		pthread_create(&hServerThread, NULL, server_listen, (void *)server_thread_params); 
+	}
+
+	if( notstopped ) {
+		pthread_create(&hViewerThread, NULL, viewer_listen, (void *)viewer_thread_params); 
+	}
 #endif
 
 	// Main loop
