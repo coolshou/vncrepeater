@@ -1,12 +1,15 @@
 CFLAGS=-Wall
 LDFLAGS=-lpthread
 
-repeater: repeater.o sockets.o vncauth.o d3des.o
-	g++ $(CFLAGS) $(LDFLAGS) -o repeater repeater.o sockets.o vncauth.o d3des.o
+repeater: repeater.o slots.o sockets.o vncauth.o d3des.o
+	g++ $(CFLAGS) $(LDFLAGS) -o repeater slots.o repeater.o sockets.o vncauth.o d3des.o
 	
 repeater.o: repeater.cpp
 	g++ $(CFLAGS) -c repeater.cpp
 
+slots.o: slots.cpp
+	g++ $(CFLAGS) -c slots.cpp
+	
 sockets.o: sockets.cpp
 	g++ $(CFLAGS) -c sockets.cpp
 
