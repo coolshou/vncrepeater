@@ -21,6 +21,9 @@
 
 #include "sockets.h"
 #include "repeater.h"
+#ifndef WIN32
+#include <string.h>
+#endif
 
 #ifdef WIN32
 
@@ -73,9 +76,8 @@ WinsockFinalize( void )
 SOCKET 
 CreateListenerSocket(u_short port)
 {
-	SOCKET				sock;
-	struct sockaddr_in	addr;
-	int one = 1;
+	SOCKET              sock;
+	struct sockaddr_in  addr;
 
 	/* zero the struct before filling the fields */
 	memset(&addr, 0, sizeof(struct sockaddr_in));
