@@ -33,7 +33,6 @@
 
 
 repeaterslot * Slots;
-repeaterslot * nextSlot;
 unsigned int slotCount;
 unsigned int max_slots;
 
@@ -67,12 +66,22 @@ ParseID(char * code)
 	return retVal;
 }
 
+repeaterslot *
+NewSlot( void )
+{
+	repeaterslot * new_slot;
+	new_slot = ((repeaterslot *)malloc( sizeof( repeaterslot ) ) );
+	if( new_slot == NULL )
+		error("Not enough memory to allocate a new slot.\n");
+	return new_slot;
+}
 
 
 void
 InitializeSlots( unsigned int max )
 {
-	nextSlot = NULL;
+	Slots = NULL;
+	//nextSlot = NULL;
 	slotCount = 0;
 	max_slots = max;
 	vncRandomBytes( challenge_key );
@@ -85,24 +94,26 @@ FreeSlots( void )
 {
 	repeaterslot *current;
 
-	current = nextSlot;
+	current = Slots;
 	while( current != NULL )
 	{
+		/* Close server connection */
 		if( current->server > 0 ) {
 			shutdown( current->server, 2);
 			closesocket( current->server );
 		}
 
+		/* Close viewer connection */
 		if( current->viewer > 0 ) {
 			shutdown( current->viewer, 2);
 			closesocket( current->viewer );
 		}
 
-		nextSlot = current->next;
+		Slots = current->next;
 		free( current );
 		slotCount--;
 
-		current = nextSlot;
+		current = Slots;
 	}
 
 	/* Check */
@@ -114,7 +125,8 @@ FreeSlots( void )
 
 
 
-repeaterslot * AddSlot(repeaterslot *slot)
+repeaterslot * 
+AddSlot(repeaterslot *slot)
 {
 	repeaterslot *current;
 
@@ -129,24 +141,33 @@ repeaterslot * AddSlot(repeaterslot *slot)
 		return NULL;
 	}
 
-	/* Find the slot, if any... */
-	current = FindSlotByChallenge( slot->challenge );
-	if( current == NULL ) {
-		/* This is a new slot */
-		current = (repeaterslot *)malloc( sizeof(repeaterslot) );
-		memcpy(current, slot, sizeof(repeaterslot));
-		current->next = nextSlot;
-		nextSlot = current;
-		slotCount++;
-	} else if( current->server <= 0 ) {
-		current->server = slot->server;
-	} else if( current->viewer <= 0 ) {
-		current->viewer = slot->viewer;
+	if( Slots == NULL ) {
+		/* There is no slot in use */
+		Slots = NewSlot();
+		if( Slots != NULL ) {
+			memcpy(Slots, slot, sizeof(repeaterslot) );
+			Slots->next = NULL;
+			slotCount++;
+		}
+		return Slots;
 	} else {
-		return NULL;
-	}
+		current = FindSlotByChallenge( slot->challenge );
+		if( current == NULL ) {
+			/* This is a new slot, but slots already exist */
+			slot->next = Slots;
+			Slots = slot;
+			slotCount++;
+			return Slots;
+		} else if( current->server <= 0 ) {
+			current->server = slot->server;
+		} else if( current->viewer <= 0 ) {
+			current->viewer = slot->viewer;
+		} else {
+			return NULL;
+		}
 
-	return current;
+		return current;
+	}
 }
 
 
@@ -156,9 +177,10 @@ FindSlotByChallenge(unsigned char * challenge)
 {
 	repeaterslot *current;
 
-	current = nextSlot;
+	current = Slots;
 	while( current != NULL)
 	{
+		// ERROR: Getting exception here!!!
 		if( memcmp(challenge, current->challenge, CHALLENGESIZE) == 0 ) {
 			return current;
 		}
@@ -169,23 +191,32 @@ FindSlotByChallenge(unsigned char * challenge)
 }
 
 
+
 void 
 FreeSlot(repeaterslot *slot)
 {
 	repeaterslot *current;
 	repeaterslot *previous;
 
-	current = nextSlot;
+	if( Slots == NULL ) {
+		debug("There are no slots to be freed.\n");
+		return;
+	}
+
+	current = Slots;
 	previous = NULL;
 
 	while( current != NULL )
 	{
 		if( memcmp(current->challenge, slot->challenge, CHALLENGESIZE) == 0 ) {
+			/* The slot has been found */
+			/* Close server socket */
 			if( slot->server > 0 ) {
 				shutdown( slot->server, 2 );
 				closesocket( slot->server );
 			}
 
+			/* Close Viewer Socket */
 			if( slot->viewer > 0 ) {
 				shutdown( slot->viewer, 2 );
 				closesocket( slot->viewer );
@@ -193,12 +224,11 @@ FreeSlot(repeaterslot *slot)
 
 			if( previous != NULL )
 				previous->next = current->next;
+			else
+				Slots = current->next;
 			
 			free( current );
 			slotCount--;
-
-			if( slotCount == 0 )
-				nextSlot = NULL;
 
 			return;
 		}
@@ -210,30 +240,37 @@ FreeSlot(repeaterslot *slot)
 	fatal("Called FreeSlot() but no slot was found.\n");
 }
 
+
 void DeleteSlotByChallenge(unsigned char * challenge)
 {
 	repeaterslot *current;
 	repeaterslot *previous;
 
-	current = nextSlot;
+	current = Slots;
 	previous = NULL;
 
 	while( current != NULL)
 	{
 		if( memcmp(challenge, current->challenge, CHALLENGESIZE) == 0 ) {
+			/* Close server connection */
 			if( current->server > 0 ) {
-				/* Close the socket */
+				shutdown( current->server, 2 );
 				closesocket( current->server );
+			}
+
+			/* Close viewer connection */
+			if( current->viewer > 0 ) {
+				shutdown( current->viewer, 2 );
+				closesocket( current->viewer );
 			}
 
 			if( previous == NULL )
 				previous->next = current->next;
+			else
+				Slots = current->next;
 				
 			free( current );
 			slotCount--;
-
-			if( slotCount == 0 )
-				nextSlot = NULL;
 
 			return;
 		}

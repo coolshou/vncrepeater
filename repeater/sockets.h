@@ -50,6 +50,10 @@
 #define SOCKET_ERROR -1
 #endif
 
+#ifndef FD_ALLOC
+#define FD_ALLOC(nfds) ((fd_set*)malloc((nfds+7)/8))
+#endif 
+
 #ifndef errno
 #define errno				WSAGetLastError()
 #endif

@@ -37,6 +37,7 @@
 #ifndef WIN32
 #include <string.h>
 #include <pthread.h>
+#include <linux/tcp.h>	/* u_short */
 #endif
 
 #include "sockets.h"
@@ -44,6 +45,8 @@
 #include "vncauth.h"
 #include "repeater.h"
 #include "slots.h"
+#include "config.h"
+#include "version.h"
 
 // Defines
 #ifndef WIN32
@@ -52,9 +55,6 @@
 
 #define TRUE	1
 #define FALSE	0 
-#ifndef FD_ALLOC
-#define FD_ALLOC(nfds) ((fd_set*)malloc((nfds+7)/8))
-#endif 
 
 #define MAX_HOST_NAME_LEN	250
 
@@ -67,6 +67,8 @@ typedef struct _listener_thread_params {
 
 // Global variables
 int notstopped;
+
+int nagle_disabled;
 
 // Prototypes
 int ParseDisplay(char *display, char *phost, int hostlen, char *pport);
@@ -181,17 +183,16 @@ void *do_repeater(void *lpParam)
 #endif
 {
 	/** vars for viewer input data **/
-	char viewerbuf[1024];		/* viewer input buffer */
-	unsigned int viewerbuf_len;			/* available data in viewerbuf */
-	int f_viewer;				/* read viewer input more? */ 
+	char viewerbuf[1024];        /* viewer input buffer */
+	unsigned int viewerbuf_len;  /* available data in viewerbuf */
+	int f_viewer;                /* read viewer input more? */ 
 	/** vars for server input data **/
-	char serverbuf[1024];		/* server input buffer */
-	unsigned int serverbuf_len;			/* available data in serverbuf */
-	int f_server;				/* read server input more? */
+	char serverbuf[1024];        /* server input buffer */
+	unsigned int serverbuf_len;  /* available data in serverbuf */
+	int f_server;                /* read server input more? */
 	/** other variables **/
 	int nfds, len;
 	fd_set *ifds, *ofds; 
-	struct timeval *tmo;
 	CARD8 client_init;
 	repeaterslot *slot;
 
@@ -215,7 +216,6 @@ void *do_repeater(void *lpParam)
 		ofds = FD_ALLOC(nfds);
 		f_viewer = 1;              /* yes, read from viewer */
 		f_server = 1;              /* yes, read from server */
-		tmo = NULL;
 	}
 
 	// Start the repeater loop.
@@ -223,7 +223,6 @@ void *do_repeater(void *lpParam)
 	{
 		FD_ZERO(ifds);
 		FD_ZERO(ofds); 
-		tmo = NULL;
 
 		/** prepare for reading viewer input **/ 
 		if (f_viewer && (viewerbuf_len < sizeof(viewerbuf))) {
@@ -235,7 +234,6 @@ void *do_repeater(void *lpParam)
 			FD_SET(slot->server, ifds);
 		} 
 
-		//if( select(nfds, ifds, ofds, NULL, tmo) == -1 ) {
 		if( select(nfds, ifds, ofds, NULL, NULL) == -1 ) {
 			/* some error */
 			error("do_repeater(): select() failed, errno=%d\n", errno);
@@ -316,6 +314,7 @@ void *do_repeater(void *lpParam)
 
 	/** When the thread exits **/
 	FreeSlot( slot );
+	debug("Repeater thread closed.\n");
 	return 0;
 }
 
@@ -338,6 +337,8 @@ void *server_listen(void *lpParam)
 	unsigned char challenge[CHALLENGESIZE];
 	repeaterslot *slot;
 	repeaterslot *current;
+	int bool_flag;
+	char * ip_addr;
 #ifdef WIN32
 	DWORD dwThreadId;
 #else
@@ -361,6 +362,17 @@ void *server_listen(void *lpParam)
 			if( notstopped )
 				debug("server_listen(): accept() failed, errno=%d\n", errno);
 		} else {
+			/* IP Address for monitoring purposes */
+			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
+			debug("Server connection accepted from %s.\n", ip_addr);
+
+			/* Disable Nagle Algorithm as proposed by YY */
+			if( nagle_disabled == 1 ) {
+				bool_flag = 1;
+				if( setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, (char *)&bool_flag, sizeof( int )) != 0 )
+					error("Failed to disable the Nagle Algorithm.\n");
+			} 
+
 			// First thing is first: Get the repeater ID...
 			if( ReadExact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
 				debug("server_listen(): Reading Proxy settings error");
@@ -425,9 +437,8 @@ void *server_listen(void *lpParam)
 			slot->next = NULL;
 			
 			current = AddSlot(slot);
-			free( slot );
-
 			if( current == NULL ) {
+				free( slot );
 				closesocket( connection );
 				continue;
 			} else if( ( current->viewer > 0 ) && ( current->server > 0 ) ) {
@@ -442,8 +453,11 @@ void *server_listen(void *lpParam)
 	}
 
 	notstopped = FALSE;
+	shutdown( thread_params->sock, 2);
 	closesocket(thread_params->sock);
-
+#ifdef _DEBUG
+	debug("Server listening thread has exited.\n");
+#endif
 	return 0;
 }
 
@@ -466,6 +480,8 @@ void *viewer_listen(void *lpParam)
 	unsigned char challenge[CHALLENGESIZE];
 	repeaterslot *slot;
 	repeaterslot *current;
+	int bool_flag;
+	char * ip_addr;
 #ifdef WIN32
 	DWORD dwThreadId;
 #else
@@ -489,6 +505,17 @@ void *viewer_listen(void *lpParam)
 			if( notstopped )
 				debug("viewer_listen(): accept() failed, errno=%d\n", errno);
 		} else {
+			/* IP Address for monitoring purposes */
+			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
+			debug("Viewer connection accepted from %s.\n", ip_addr);
+
+			/* Disable Nagle Algorithm as proposed by YY */
+			if( nagle_disabled == 1 ) {
+				bool_flag = 1;
+				if( setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, (char *)&bool_flag, sizeof( int )) != 0 )
+					error("Failed to disable the Nagle Algorithm.\n");
+			} 
+
 			// Act like a server until the authentication phase is over.
 			// Send the protocol version.
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
@@ -559,9 +586,8 @@ void *viewer_listen(void *lpParam)
 			slot->next = NULL;
 			
 			current = AddSlot( slot );
-			free( slot );
-
 			if( current == NULL ) {
+				free( slot );
 				closesocket( connection );
 				continue;
 			} else if( ( current->server > 0 ) && ( current->viewer > 0 ) ) {
@@ -576,7 +602,11 @@ void *viewer_listen(void *lpParam)
 	}
 
 	notstopped = FALSE;
+	shutdown( thread_params->sock, 2);
 	closesocket( thread_params->sock );
+#ifdef _DEBUG
+	debug("Viewer listening thread has exited.\n");
+#endif
 	return 0;
 }
 
@@ -654,10 +684,15 @@ int main(int argc, char **argv)
 	pthread_t hViewerThread;
 #endif
 
-	/* Arguments */
-	server_port = 5500;
-	viewer_port = 5900;
+	/* Load configuration file */
+	if( GetConfigurationPort("ServerPort", &server_port) == 0 )
+		server_port = 5500;
+	if( GetConfigurationPort("ViewerPort", &viewer_port) == 0 )
+		viewer_port = 5900;
+	if( GetConfigurationBoolean("Disable-Nagle", &nagle_disabled) == 0 )
+		nagle_disabled = 0;
 
+	/* Arguments */
 	if( argc > 1 ) {
 		for( int i=1;i<argc;i++ )
 		{
@@ -714,8 +749,12 @@ int main(int argc, char **argv)
 #endif
 
 	/* Start */
-	printf("\nVNC Repeater - http://code.google.com/p/vncrepeater\n===================================================\n\n");
-		    
+	printf("\nVNC Repeater [Version %s]\n", VNCREPEATER_VERSION);
+	printf("Copyright (C) 2010 Juan Pedro Gonzalez Gutierrez. Licensed under GPL v2.\n");
+	printf("Get the latest version at http://code.google.com/p/vncrepeater/\n\n");
+	
+	debug("Nagle Algorithm: %s.\n", ((nagle_disabled == 1) ? "OFF" : "ON"));
+
 	/* Initialize some variables */
 	notstopped = TRUE;
 	InitializeSlots( 20 );
