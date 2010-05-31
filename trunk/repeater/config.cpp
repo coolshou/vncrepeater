@@ -55,7 +55,7 @@ trim(char * s) {
 
 	/* Trim left */
 	while( ( *start == ' ' ) || ( *start == '\t' ) || ( *start == '\n' ) ) {
-		if( *start = '\0' ) return NULL;
+		if( *start == '\0' ) return NULL;
 		start++;
 	}
 

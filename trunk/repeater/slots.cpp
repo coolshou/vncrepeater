@@ -100,13 +100,13 @@ FreeSlots( void )
 		/* Close server connection */
 		if( current->server > 0 ) {
 			shutdown( current->server, 2);
-			closesocket( current->server );
+			socket_close( current->server );
 		}
 
 		/* Close viewer connection */
 		if( current->viewer > 0 ) {
 			shutdown( current->viewer, 2);
-			closesocket( current->viewer );
+			socket_close( current->viewer );
 		}
 
 		Slots = current->next;
@@ -211,15 +211,15 @@ FreeSlot(repeaterslot *slot)
 		if( memcmp(current->challenge, slot->challenge, CHALLENGESIZE) == 0 ) {
 			/* The slot has been found */
 			/* Close server socket */
-			if( slot->server > 0 ) {
+			if( slot->server >= 0 ) {
 				shutdown( slot->server, 2 );
-				closesocket( slot->server );
+				socket_close( slot->server );
 			}
 
 			/* Close Viewer Socket */
-			if( slot->viewer > 0 ) {
+			if( slot->viewer >= 0 ) {
 				shutdown( slot->viewer, 2 );
-				closesocket( slot->viewer );
+				socket_close( slot->viewer );
 			}
 
 			if( previous != NULL )
@@ -255,13 +255,13 @@ void DeleteSlotByChallenge(unsigned char * challenge)
 			/* Close server connection */
 			if( current->server > 0 ) {
 				shutdown( current->server, 2 );
-				closesocket( current->server );
+				socket_close( current->server );
 			}
 
 			/* Close viewer connection */
 			if( current->viewer > 0 ) {
 				shutdown( current->viewer, 2 );
-				closesocket( current->viewer );
+				socket_close( current->viewer );
 			}
 
 			if( previous == NULL )
