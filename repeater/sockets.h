@@ -38,9 +38,6 @@
  *
  *****************************************************************************/
 
-#ifndef SOCKET
-#define SOCKET int
-#endif
 
 #ifndef INVALID_SOCKET
 #define INVALID_SOCKET -1
@@ -50,22 +47,21 @@
 #define SOCKET_ERROR -1
 #endif
 
+#ifndef EWOULDBLOCK
+#define EWOULDBLOCK WSAEWOULDBLOCK
+#endif
+
 #ifndef FD_ALLOC
 #define FD_ALLOC(nfds) ((fd_set*)malloc((nfds+7)/8))
 #endif 
 
-#ifndef errno
-#define errno				WSAGetLastError()
-#endif
-
-#ifndef WIN32
-#define closesocket(s) close(s)
-#endif
 
 #ifdef WIN32
+extern int errno;
 typedef int socklen_t;
+#else
+typedef int SOCKET;
 #endif
-
 
 
 /*****************************************************************************
@@ -86,3 +82,7 @@ void WinsockFinalize( void );
 SOCKET CreateListenerSocket(u_short port);
 int ReadExact(int sock, char *buf, int len);
 int WriteExact(int sock, char *buf, int len);
+SOCKET socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen);
+int socket_close(SOCKET s);
+int socket_read(SOCKET s, char * buff, socklen_t bufflen);
+int socket_read_exact(SOCKET s, char * buff, socklen_t bufflen);

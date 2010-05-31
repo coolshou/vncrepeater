@@ -68,8 +68,6 @@ typedef struct _listener_thread_params {
 // Global variables
 int notstopped;
 
-int nagle_disabled;
-
 // Prototypes
 int ParseDisplay(char *display, char *phost, int hostlen, char *pport);
 void ExitRepeater(int sig);
@@ -195,11 +193,17 @@ void *do_repeater(void *lpParam)
 	fd_set *ifds, *ofds; 
 	CARD8 client_init;
 	repeaterslot *slot;
+	struct timeval tm;
+	int selres;
 
 	slot = (repeaterslot *)lpParam;
 	
 	viewerbuf_len = 0;
-	serverbuf_len = 0; 
+	serverbuf_len = 0;
+
+	// Timeout
+	tm.tv_sec= 0;
+	tm.tv_usec = 50;
 
 	debug("do_reapeater(): Starting repeater for ID %s.\n", slot->challenge);
 
@@ -221,70 +225,84 @@ void *do_repeater(void *lpParam)
 	// Start the repeater loop.
 	while( f_viewer && f_server)
 	{
-		FD_ZERO(ifds);
-		FD_ZERO(ofds); 
+		/* Bypass reading if there is still data to be sent in the buffers */
+		if( ( serverbuf_len == 0 ) && ( viewerbuf_len == 0 ) ) {
+			FD_ZERO(ifds);
+			FD_ZERO(ofds); 
 
-		/** prepare for reading viewer input **/ 
-		if (f_viewer && (viewerbuf_len < sizeof(viewerbuf))) {
-			FD_SET(slot->viewer, ifds);
-		} 
+			/** prepare for reading viewer input **/ 
+			if (f_viewer && (viewerbuf_len < sizeof(viewerbuf))) {
+				FD_SET(slot->viewer, ifds);
+			} 
 
-		/** prepare for reading server input **/
-		if (f_server && (serverbuf_len < sizeof(serverbuf))) {
-			FD_SET(slot->server, ifds);
-		} 
+			/** prepare for reading server input **/
+			if (f_server && (serverbuf_len < sizeof(serverbuf))) {
+				FD_SET(slot->server, ifds);
+			} 
 
-		if( select(nfds, ifds, ofds, NULL, NULL) == -1 ) {
-			/* some error */
-			error("do_repeater(): select() failed, errno=%d\n", errno);
-			f_viewer = 0;              /* no, don't read from viewer */
-			f_server = 0;              /* no, don't read from server */
-			continue;
-		}
-
-		/* server => viewer */ 
-		if (FD_ISSET(slot->server, ifds) && (serverbuf_len < sizeof(serverbuf))) { 
-			len = recv(slot->server, serverbuf + serverbuf_len, sizeof(serverbuf) - serverbuf_len, 0); 
-
-			if (len == 0) { 
-				debug("do_repeater(): connection closed by server.\n");
+			selres = select(nfds, ifds, ofds, NULL, &tm);
+			if( selres == -1 ) {
+				/* some error */
+				error("do_repeater(): select() failed, errno=%d\n", errno);
+				f_viewer = 0;              /* no, don't read from viewer */
 				f_server = 0;              /* no, don't read from server */
 				continue;
-			} else if ( len == -1 ) {
-				/* error on reading from stdin */
-				f_server = 0;              /* no, don't read from server */
+			} else if( selres == 0 ) {
+				/*Timeout */
 				continue;
-			} else {
-				/* repeat */
-				serverbuf_len += len; 
 			}
-		}
-
-		/* viewer => server */ 
-		if( FD_ISSET(slot->viewer, ifds)  && (viewerbuf_len < sizeof(viewerbuf)) ) {
-			len = recv(slot->viewer, viewerbuf + viewerbuf_len, sizeof(viewerbuf) - viewerbuf_len, 0);
-
-			if (len == 0) { 
-				debug("do_repeater(): connection closed by viewer.\n");
-				// ToDo: Leave ready, but don't remove it...
-				f_viewer = 0;
-				continue;
-			} else if ( len == -1 ) {
-				/* error on reading from stdin */
-				f_viewer = 0;
-				continue;
-			} else {
-				/* repeat */
-				viewerbuf_len += len; 
-			}
-		}
 		
+
+			/* server => viewer */ 
+			if (FD_ISSET(slot->server, ifds) && (serverbuf_len < sizeof(serverbuf))) { 
+				len = recv(slot->server, serverbuf + serverbuf_len, sizeof(serverbuf) - serverbuf_len, 0); 
+
+				if (len == 0) { 
+					debug("do_repeater(): connection closed by server.\n");
+					f_server = 0;              /* no, don't read from server */
+					continue;
+				} else if ( len == -1 ) {
+					/* error on reading from stdin */
+					f_server = 0;              /* no, don't read from server */
+					continue;
+				} else {
+					/* repeat */
+					serverbuf_len += len; 
+				}
+			}
+
+			/* viewer => server */ 
+			if( FD_ISSET(slot->viewer, ifds)  && (viewerbuf_len < sizeof(viewerbuf)) ) {
+				len = recv(slot->viewer, viewerbuf + viewerbuf_len, sizeof(viewerbuf) - viewerbuf_len, 0);
+
+				if (len == 0) { 
+					debug("do_repeater(): connection closed by viewer.\n");
+					// ToDo: Leave ready, but don't remove it...
+					f_viewer = 0;
+					continue;
+				} else if ( len == -1 ) {
+					/* error on reading from stdin */
+					f_viewer = 0;
+					continue;
+				} else {
+					/* repeat */
+					viewerbuf_len += len; 
+				}
+			}
+		}
+
 		/* flush data in viewerbuffer to server */ 
 		if( 0 < viewerbuf_len ) { 
+			
 			len = send(slot->server, viewerbuf, viewerbuf_len, 0); 
 			if( len == -1 ) {
-				debug("do_repeater(): send() failed, %d\n", errno);
-				f_server = 0;
+#ifdef WIN32
+				errno = WSAGetLastError();
+#endif
+				if( errno != EWOULDBLOCK ) {
+					debug("do_repeater(): send() failed, viewer to server %d\n", errno);
+					f_server = 0;
+				}
 				continue;
 			} else if ( 0 < len ) {
 				/* move data on to top of buffer */ 
@@ -299,8 +317,13 @@ void *do_repeater(void *lpParam)
 		if( 0 < serverbuf_len ) { 
 			len = send(slot->viewer, serverbuf, serverbuf_len, 0);
 			if( len == -1 ) {
-				debug("do_repeater(): send() failed, %d\n", errno);
-				f_viewer = 0;
+#ifdef WIN32
+				errno = WSAGetLastError();
+#endif
+				if( errno != EWOULDBLOCK ) {
+					debug("do_repeater(): send() failed, server to viewer %d\n", errno);
+					f_viewer = 0;
+				}
 				continue;
 			} else if ( 0 < len ) {
 				/* move data on to top of buffer */ 
@@ -337,7 +360,6 @@ void *server_listen(void *lpParam)
 	unsigned char challenge[CHALLENGESIZE];
 	repeaterslot *slot;
 	repeaterslot *current;
-	int bool_flag;
 	char * ip_addr;
 #ifdef WIN32
 	DWORD dwThreadId;
@@ -356,7 +378,7 @@ void *server_listen(void *lpParam)
 
 	while( notstopped )
 	{
-		connection = accept(thread_params->sock, &client, &socklen);
+		connection = socket_accept(thread_params->sock, &client, &socklen);
 	
 		if( connection < 0 ) {
 			if( notstopped )
@@ -366,17 +388,10 @@ void *server_listen(void *lpParam)
 			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
 			debug("Server connection accepted from %s.\n", ip_addr);
 
-			/* Disable Nagle Algorithm as proposed by YY */
-			if( nagle_disabled == 1 ) {
-				bool_flag = 1;
-				if( setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, (char *)&bool_flag, sizeof( int )) != 0 )
-					error("Failed to disable the Nagle Algorithm.\n");
-			} 
-
 			// First thing is first: Get the repeater ID...
-			if( ReadExact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
+			if( socket_read_exact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
 				debug("server_listen(): Reading Proxy settings error");
-				closesocket( connection ); 
+				socket_close( connection ); 
 				continue;
 			}
 
@@ -384,15 +399,15 @@ void *server_listen(void *lpParam)
 			memset((char *)&challenge, 0, CHALLENGESIZE);
 			if( ParseDisplay(host_id, phost, MAX_HOST_NAME_LEN, (unsigned char *)&challenge) == FALSE ) {
 				debug("server_listen(): Reading Proxy settings error");
-				closesocket( connection ); 
+				socket_close( connection ); 
 				continue;
 			}
 
 			// Continue with the handshake until ClientInit.
 			// Read the Protocol Version
-			if( ReadExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
+			if( socket_read_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("server_listen(): Reading protocol version error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
@@ -402,7 +417,7 @@ void *server_listen(void *lpParam)
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
 			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("server_listen(): Writting protocol version error.\n");
-				closesocket(connection);
+				socket_close(connection);
 				continue;
 			}
 
@@ -410,15 +425,15 @@ void *server_listen(void *lpParam)
 			// ToDo: We could add a password this would restrict other servers from
 			//       connecting to our repeater, in the meanwhile, assume no auth
 			//       is the only scheme allowed.
-			if( ReadExact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
+			if( socket_read_exact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
 				debug("server_listen(): Reading authentication type error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 			auth_type = Swap32IfLE(auth_type);
 			if( auth_type != rfbNoAuth ) {
 				debug("server_listen(): Invalid authentication scheme.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
@@ -431,7 +446,7 @@ void *server_listen(void *lpParam)
 			memset(slot, 0, sizeof(repeaterslot));
 
 			slot->server = connection;
-			slot->viewer = INVALID_SOCKET;
+			//slot->viewer = INVALID_SOCKET;
 			slot->timestamp = (unsigned long)time(NULL);
 			memcpy(slot->challenge, challenge, CHALLENGESIZE);
 			slot->next = NULL;
@@ -439,7 +454,7 @@ void *server_listen(void *lpParam)
 			current = AddSlot(slot);
 			if( current == NULL ) {
 				free( slot );
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			} else if( ( current->viewer > 0 ) && ( current->server > 0 ) ) {
 				// Thread...
@@ -454,7 +469,7 @@ void *server_listen(void *lpParam)
 
 	notstopped = FALSE;
 	shutdown( thread_params->sock, 2);
-	closesocket(thread_params->sock);
+	socket_close(thread_params->sock);
 #ifdef _DEBUG
 	debug("Server listening thread has exited.\n");
 #endif
@@ -480,7 +495,6 @@ void *viewer_listen(void *lpParam)
 	unsigned char challenge[CHALLENGESIZE];
 	repeaterslot *slot;
 	repeaterslot *current;
-	int bool_flag;
 	char * ip_addr;
 #ifdef WIN32
 	DWORD dwThreadId;
@@ -500,7 +514,7 @@ void *viewer_listen(void *lpParam)
 	// Main loop
 	while( notstopped )
 	{
-		connection = accept(thread_params->sock, &client, &socklen);
+		connection = socket_accept(thread_params->sock, &client, &socklen);
 		if( connection < 0 ) {
 			if( notstopped )
 				debug("viewer_listen(): accept() failed, errno=%d\n", errno);
@@ -509,26 +523,19 @@ void *viewer_listen(void *lpParam)
 			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
 			debug("Viewer connection accepted from %s.\n", ip_addr);
 
-			/* Disable Nagle Algorithm as proposed by YY */
-			if( nagle_disabled == 1 ) {
-				bool_flag = 1;
-				if( setsockopt(connection, IPPROTO_TCP, TCP_NODELAY, (char *)&bool_flag, sizeof( int )) != 0 )
-					error("Failed to disable the Nagle Algorithm.\n");
-			} 
-
 			// Act like a server until the authentication phase is over.
 			// Send the protocol version.
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
 			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("viewer_listen(): Writting protocol version error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
 			// Read the protocol version the client suggests (Must be 3.3)
-			if( ReadExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
+			if( socket_read_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
 				debug("viewer_listen(): Reading protocol version error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
@@ -536,7 +543,7 @@ void *viewer_listen(void *lpParam)
 			auth_type = Swap32IfLE(rfbVncAuth);
 			if( WriteExact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
 				debug("viewer_listen(): Writting authentication type error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
@@ -544,16 +551,16 @@ void *viewer_listen(void *lpParam)
 			// In order for this to work the challenge must be always the same.
 			if( WriteExact(connection, (char *)&challenge_key, CHALLENGESIZE) < 0 ) {
 				debug("viewer_listen(): Writting challenge error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
 			// Read the password.
 			// It will be treated as the repeater IDentifier.
 			memset(&challenge, 0, CHALLENGESIZE);
-			if( ReadExact(connection, (char *)&challenge, CHALLENGESIZE) < 0 ) {
+			if( socket_read_exact(connection, (char *)&challenge, CHALLENGESIZE) < 0 ) {
 				debug("viewer_listen(): Reading challenge response error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
@@ -561,14 +568,14 @@ void *viewer_listen(void *lpParam)
 			auth_response = Swap32IfLE(rfbVncAuthOK);
 			if( WriteExact(connection, (char *)&auth_response, sizeof(auth_response)) < 0 ) {
 				debug("viewer_listen(): Writting authentication response error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
 			// Retrieve ClientInit and save it inside the structure.
-			if( ReadExact(connection, (char *)&client_init, sizeof(client_init)) < 0 ) {
+			if( socket_read_exact(connection, (char *)&client_init, sizeof(client_init)) < 0 ) {
 				debug("viewer_listen(): Reading ClientInit message error.\n");
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			}
 
@@ -579,7 +586,7 @@ void *viewer_listen(void *lpParam)
 			slot = (repeaterslot *)malloc( sizeof(repeaterslot) );
 			memset(slot, 0, sizeof(repeaterslot));
 
-			slot->server = INVALID_SOCKET;
+			//slot->server = INVALID_SOCKET;
 			slot->viewer = connection;
 			slot->timestamp = (unsigned long)time(NULL);
 			memcpy(slot->challenge, challenge, CHALLENGESIZE);
@@ -588,7 +595,7 @@ void *viewer_listen(void *lpParam)
 			current = AddSlot( slot );
 			if( current == NULL ) {
 				free( slot );
-				closesocket( connection );
+				socket_close( connection );
 				continue;
 			} else if( ( current->server > 0 ) && ( current->viewer > 0 ) ) {
 				// Thread...
@@ -603,7 +610,7 @@ void *viewer_listen(void *lpParam)
 
 	notstopped = FALSE;
 	shutdown( thread_params->sock, 2);
-	closesocket( thread_params->sock );
+	socket_close( thread_params->sock );
 #ifdef _DEBUG
 	debug("Viewer listening thread has exited.\n");
 #endif
@@ -689,8 +696,6 @@ int main(int argc, char **argv)
 		server_port = 5500;
 	if( GetConfigurationPort("ViewerPort", &viewer_port) == 0 )
 		viewer_port = 5900;
-	if( GetConfigurationBoolean("Disable-Nagle", &nagle_disabled) == 0 )
-		nagle_disabled = 0;
 
 	/* Arguments */
 	if( argc > 1 ) {
@@ -752,8 +757,6 @@ int main(int argc, char **argv)
 	printf("\nVNC Repeater [Version %s]\n", VNCREPEATER_VERSION);
 	printf("Copyright (C) 2010 Juan Pedro Gonzalez Gutierrez. Licensed under GPL v2.\n");
 	printf("Get the latest version at http://code.google.com/p/vncrepeater/\n\n");
-	
-	debug("Nagle Algorithm: %s.\n", ((nagle_disabled == 1) ? "OFF" : "ON"));
 
 	/* Initialize some variables */
 	notstopped = TRUE;
@@ -811,8 +814,8 @@ int main(int argc, char **argv)
 	FreeSlots();
 
 	/* Close the sockets used for the listeners */
-	closesocket( server_thread_params->sock );
-	closesocket( viewer_thread_params->sock );
+	socket_close( server_thread_params->sock );
+	socket_close( viewer_thread_params->sock );
 	
 	/* Free allocated memory for the thread parameters */
 	free( server_thread_params );
