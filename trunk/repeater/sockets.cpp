@@ -229,6 +229,9 @@ socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen)
 {
 	SOCKET sock;
 	const int one = 1;
+
+	errno = 0;
+
 #ifdef WIN32
 	u_long ioctlsocket_arg = 1;
 #endif
@@ -242,16 +245,26 @@ socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen)
 
 	// Attempt to set the new socket's options
 	// Disable Nagle Algorithm
+#ifndef _DEBUG
 	setsockopt( sock, IPPROTO_TCP, TCP_NODELAY, (char *)&one, sizeof(one));
+#else
+	if( setsockopt( sock, IPPROTO_TCP, TCP_NODELAY, (char *)&one, sizeof(one)) == -1 ) {
+		debug("Failed to disable Nagle Algorithm.\n");
+	} else {
+		debug("Nagle Algoritmh has been disabled.\n");
+	}
+#endif
 
 	// Put the socket into non-blocking mode
 #ifdef WIN32
 	if (ioctlsocket( sock, FIONBIO, &ioctlsocket_arg) != 0) {
+		error("Failed to set socket in non-blocking mode.\n");
 		socket_close( sock );
 		return -1;
 	}
 #else
 	if (fcntl( sock, F_SETFL, O_NDELAY) != 0) {
+		error("Failed to set socket in non-blocking mode.\n");
 		socket_close( sock );
 		return -1;
 	}
@@ -263,6 +276,8 @@ socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen)
 int 
 socket_close(SOCKET s)
 {
+	errno = 0;
+
 	shutdown( s, 2);
 #ifdef WIN32
 	if( closesocket( s ) != 0 ) {

@@ -263,6 +263,10 @@ void *do_repeater(void *lpParam)
 					continue;
 				} else if ( len == -1 ) {
 					/* error on reading from stdin */
+#ifdef WIN32
+					errno = WSAGetLastError();
+#endif
+					error("Error reading from socket. Socket error = %d.\n", errno );
 					f_server = 0;              /* no, don't read from server */
 					continue;
 				} else {
@@ -282,6 +286,10 @@ void *do_repeater(void *lpParam)
 					continue;
 				} else if ( len == -1 ) {
 					/* error on reading from stdin */
+#ifdef WIN32
+					errno = WSAGetLastError();
+#endif
+					error("Error reading from socket. Socket error = %d.\n", errno );
 					f_viewer = 0;
 					continue;
 				} else {
@@ -300,7 +308,7 @@ void *do_repeater(void *lpParam)
 				errno = WSAGetLastError();
 #endif
 				if( errno != EWOULDBLOCK ) {
-					debug("do_repeater(): send() failed, viewer to server %d\n", errno);
+					debug("do_repeater(): send() failed, viewer to server. Socket error = %d\n", errno);
 					f_server = 0;
 				}
 				continue;
@@ -321,7 +329,7 @@ void *do_repeater(void *lpParam)
 				errno = WSAGetLastError();
 #endif
 				if( errno != EWOULDBLOCK ) {
-					debug("do_repeater(): send() failed, server to viewer %d\n", errno);
+					debug("do_repeater(): send() failed, server to viewer. Socket error = %d\n", errno);
 					f_viewer = 0;
 				}
 				continue;
@@ -653,6 +661,9 @@ ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds)
 void 
 ExitRepeater(int sig)
 {
+#ifdef _DEBUG
+	debug("Exit signal trapped.\n");
+#endif
 	notstopped = FALSE;
 }
 
