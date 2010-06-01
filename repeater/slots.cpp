@@ -100,13 +100,27 @@ FreeSlots( void )
 		/* Close server connection */
 		if( current->server > 0 ) {
 			shutdown( current->server, 2);
-			socket_close( current->server );
+			if( socket_close( current->server ) == -1 ) {
+				error("Server socket failed to close. Socket error = %d.\n", errno);
+			}
+#ifdef _DEBUG
+				else {
+					debug("Server socket has been closed.\n");
+				}
+#endif
 		}
 
 		/* Close viewer connection */
 		if( current->viewer > 0 ) {
 			shutdown( current->viewer, 2);
-			socket_close( current->viewer );
+			if( socket_close( current->viewer ) == -1 ) {
+				error("Viewer socket failed to close. Socket error = %d.\n", errno);
+			}
+#ifdef _DEBUG
+				else {
+					debug("Viewer socket has been closed.\n");
+				}
+#endif
 		}
 
 		Slots = current->next;
@@ -178,15 +192,24 @@ FindSlotByChallenge(unsigned char * challenge)
 	repeaterslot *current;
 
 	current = Slots;
+#ifdef _DEBUG
+	debug("Trying to find a slot for a challenge ID.\n");
+#endif
 	while( current != NULL)
 	{
 		// ERROR: Getting exception here!!!
 		if( memcmp(challenge, current->challenge, CHALLENGESIZE) == 0 ) {
+#ifdef _DEBUG
+			debug("Found a slot assigned to the given challenge ID.\n");
+#endif
 			return current;
 		}
 		current = current->next;
 	}
 
+#ifdef _DEBUG
+	debug("Failed to find an assigned slot for the given Challenge ID. Probably a new ID.\n");
+#endif
 	return NULL;
 }
 
@@ -206,20 +229,40 @@ FreeSlot(repeaterslot *slot)
 	current = Slots;
 	previous = NULL;
 
+#ifdef _DEBUG
+	debug("Trying to free slot...\n");
+#endif
 	while( current != NULL )
 	{
 		if( memcmp(current->challenge, slot->challenge, CHALLENGESIZE) == 0 ) {
 			/* The slot has been found */
+#ifdef _DEBUG
+			debug("Slots found. Trying to free resources.\n");
+#endif
 			/* Close server socket */
 			if( slot->server >= 0 ) {
 				shutdown( slot->server, 2 );
-				socket_close( slot->server );
+				if( socket_close( slot->server ) == -1 ) {
+					error("Server socket failed to close. Socket error = %d\n", errno);
+				}
+#ifdef _DEBUG
+				else {
+					debug("Server socket has been closed.\n");
+				}
+#endif
 			}
 
 			/* Close Viewer Socket */
 			if( slot->viewer >= 0 ) {
 				shutdown( slot->viewer, 2 );
-				socket_close( slot->viewer );
+				if( socket_close( slot->viewer ) == -1 ) {
+					error("Viewer socket failed to close. Socket error = %d\n", errno);
+				}
+#ifdef _DEBUG
+				else {
+					debug("Viewer socket has been closed.\n");
+				}
+#endif
 			}
 
 			if( previous != NULL )
@@ -229,7 +272,9 @@ FreeSlot(repeaterslot *slot)
 			
 			free( current );
 			slotCount--;
-
+#ifdef _DEBUG
+			debug("Slot has been freed.\n");
+#endif
 			return;
 		}
 

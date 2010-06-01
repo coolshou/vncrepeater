@@ -1,4 +1,10 @@
+
+ifeq ($(CFG),debug)
+CFLAGS= -g -Wall -D_DEBUG 
+else
 CFLAGS=-Wall
+endif
+
 LDFLAGS=-lpthread
 
 repeater: repeater.o config.o slots.o sockets.o vncauth.o d3des.o
