@@ -52,6 +52,14 @@
 #define EWOULDBLOCK WSAEWOULDBLOCK
 #endif
 
+#ifndef ENOTCONN
+#define ENOTCONN WSAENOTCONN
+#endif
+
+#ifndef ECONNRESET
+#define ECONNRESET WSAECONNRESET 
+#endif
+
 #ifndef FD_ALLOC
 #define FD_ALLOC(nfds) ((fd_set*)malloc((nfds+7)/8))
 #endif 
@@ -62,6 +70,7 @@ extern int errno;
 typedef int socklen_t;
 #else
 typedef int SOCKET;
+typedef uint8_t	BYTE;
 #endif
 
 
@@ -81,7 +90,7 @@ void WinsockFinalize( void );
  *
  *****************************************************************************/
 SOCKET CreateListenerSocket(u_short port);
-int ReadExact(int sock, char *buf, int len);
+//int ReadExact(int sock, char *buf, int len);
 int WriteExact(int sock, char *buf, int len);
 SOCKET socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen);
 int socket_close(SOCKET s);

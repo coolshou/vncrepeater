@@ -133,23 +133,23 @@ CreateListenerSocket(u_short port)
 
 
 
-int 
-ReadExact(int sock, char *buf, int len)
-{
-	int n;
-
-	while (len > 0) {
-		n = recv(sock, buf, len, 0);
-		if (n > 0) {
-			buf += n;
-			len -= n;
-		} else {
-			return n;
-		}
-	}
-
-	return 1;
-}
+//int 
+//ReadExact(int sock, char *buf, int len)
+//{
+//	int n;
+//
+//	while (len > 0) {
+//		n = recv(sock, buf, len, 0);
+//		if (n > 0) {
+//			buf += n;
+//			len -= n;
+//		} else {
+//			return n;
+//		}
+//	}
+//
+//	return 1;
+//}
 
 int 
 socket_read(SOCKET s, char * buff, socklen_t bufflen)
@@ -162,6 +162,8 @@ socket_read(SOCKET s, char * buff, socklen_t bufflen)
 		errno = WSAGetLastError();
 #endif
 		return -1;
+	} else if( bytes == 0 ) {
+		errno = ENOTCONN;
 	}
 
 	return bytes;
@@ -209,11 +211,12 @@ socket_read_exact(SOCKET s, char * buff, socklen_t bufflen)
 				errno = WSAGetLastError();
 #endif
 				if( errno != EWOULDBLOCK) {
-					error("socket error.\n");
+					//error("socket error.\n");
 					return -1;
 				}
 			} else if (bytes == 0) {
-				error("zero bytes read\n");
+				//error("zero bytes read\n");
+				errno = ENOTCONN;
 				return -1;
 			}
 		}

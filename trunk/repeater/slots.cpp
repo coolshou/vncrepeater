@@ -184,6 +184,129 @@ AddSlot(repeaterslot *slot)
 	}
 }
 
+/* Free any slot if the connection has been reseted by peer */
+void
+CleanupSlots( void )
+{
+	repeaterslot *current;
+	repeaterslot * previous;
+	repeaterslot *next;
+	fd_set read_fds;
+	struct timeval tm;
+	BYTE buf;
+	int num_bytes;
+
+	current = Slots;
+	previous = NULL;
+	tm.tv_sec=0;
+	tm.tv_usec=50;
+
+	while( current != NULL )
+	{
+		/* " <= 0 " should be " == INVALID_SOCKET" but this fails somehow :( */
+		if( ( current->viewer <= 0 ) || ( current->server <= 0 ) ) {
+			FD_ZERO( &read_fds );
+			
+			if( current->viewer <= 0 ) {
+				/* check the server connection */
+				FD_SET( current->server , &read_fds );
+				if( select( current->server + 1, &read_fds, NULL, NULL, &tm) == 0 ) {
+					/* Timed out */
+					previous = current;
+					current = current->next;
+					continue;
+				}
+	
+				if( ( num_bytes = recv( current->server, (char *)&buf, 1, MSG_PEEK) ) < 0 ) {
+#ifdef WIN32
+					errno = WSAGetLastError();
+#endif
+					if( errno == ECONNRESET ) {
+#ifndef _DEBUG
+						debug("Connection closed by server.\n");
+#else
+						debug("Connection closed by server (socket=%d).\n", current->server );
+#endif
+					} else {
+#ifndef _DEBUG
+						debug("Closing server connection due to socket error number %d.\n", errno);
+#else
+						debug("Closing server (socket=%d) connection due to socket error number %d.\n", current->server, errno);
+#endif
+					}
+				} else if( num_bytes == 0 ){
+#ifndef _DEBUG
+						debug("Connection closed by server.\n");
+#else
+						debug("Connection closed by server (socket=%d).\n", current->server );
+#endif
+				} else {
+					/* Server is alive */
+					previous = current;
+					current = current->next;
+					continue;
+				}
+			} else if( current->server <= 0 ) {
+				/* Check the viewer connection */
+				FD_SET( current->viewer , &read_fds );
+				if( select( current->viewer + 1, &read_fds, NULL, NULL, &tm) == 0 ) {
+					/* Timed out */
+					previous = current;
+					current = current->next;
+					continue;
+				}
+
+				if( ( num_bytes = recv( current->viewer, (char *)&buf, 1, MSG_PEEK) ) < 0 ) {
+#ifdef WIN32
+					errno = WSAGetLastError();
+#endif
+					if( errno == ECONNRESET ) {
+#ifndef _DEBUG
+						debug("Connection closed by viewer.\n");
+#else
+						debug("Connection closed by viewer (socket=%d).\n", current->viewer );
+#endif
+					} else {
+#ifndef _DEBUG
+						debug("Closing viewer connection due to socket error number %d.\n", errno);
+#else
+						debug("Closing viewer (socket=%d) connection due to socket error number %d.\n", current->viewer, errno);
+#endif
+					}
+				} else if( num_bytes == 0 ){
+#ifndef _DEBUG
+						debug("Connection closed by viewer.\n");
+#else
+						debug("Connection closed by viewer (socket=%d).\n", current->viewer );
+#endif
+				} else {
+					/* Server is alive */
+					previous = current;
+					current = current->next;
+					continue;
+				}
+			}
+
+			// Free slot.
+			next = current->next;
+			if( previous == NULL )
+				Slots = current->next;
+			else
+				previous->next = current->next;
+
+			socket_close( current->viewer );
+			free( current );
+			current = next;
+#ifdef _DEBUG
+			debug("Slot has been freed.\n");
+#endif
+		} else {
+			previous = current;
+			current = current->next;
+			continue;
+		}
+	}
+}
 
 
 repeaterslot *
