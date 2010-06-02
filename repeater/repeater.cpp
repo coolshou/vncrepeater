@@ -38,6 +38,7 @@
 #include <string.h>
 #include <pthread.h>
 #include <linux/tcp.h>	/* u_short */
+#include <unistd.h>
 #endif
 
 #include "sockets.h"
@@ -394,14 +395,35 @@ void *server_listen(void *lpParam)
 		} else {
 			/* IP Address for monitoring purposes */
 			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
+#ifndef _DEBUG
 			debug("Server connection accepted from %s.\n", ip_addr);
+#else
+			debug("Server (socket=%d) connection accepted from %s.\n", connection, ip_addr);
+#endif
 
 			// First thing is first: Get the repeater ID...
 			if( socket_read_exact(connection, host_id, MAX_HOST_NAME_LEN) < 0 ) {
-				debug("server_listen(): Reading Proxy settings error");
+				if( ( errno == ECONNRESET )  || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by server.\n");
+#else
+					debug("Connection closed by server (socket=%d) while trying to read the host id.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Reading host id from server return socket error %d.\n", errno);
+#else
+					debug("Reading host id from server (socket=%d) return socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection ); 
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Server (socket=%d) sent the host id:%s.\n", connection, host_id );
+			}
+#endif
 
 			// Check and cypher the ID
 			memset((char *)&challenge, 0, CHALLENGESIZE);
@@ -414,11 +436,27 @@ void *server_listen(void *lpParam)
 			// Continue with the handshake until ClientInit.
 			// Read the Protocol Version
 			if( socket_read_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
-				debug("server_listen(): Reading protocol version error.\n");
+				if( ( errno == ECONNRESET )  || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by server.\n");
+#else
+					debug("Connection closed by server (socket=%d) while trying to read the protocol version.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Reading protocol version from server return socket error %d.\n", errno);
+#else
+					debug("Reading protocol version from server (socket=%d) return socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
-
+#ifdef _DEBUG
+			else {
+				debug("Server (socket=%d) sent protocol version.\n", connection);
+			}
+#endif
 			// ToDo: Make sure the version is OK!
 
 			// Tell the server we are using Protocol Version 3.3
@@ -434,10 +472,28 @@ void *server_listen(void *lpParam)
 			//       connecting to our repeater, in the meanwhile, assume no auth
 			//       is the only scheme allowed.
 			if( socket_read_exact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
-				debug("server_listen(): Reading authentication type error.\n");
+				if( ( errno == ECONNRESET )  || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by server.\n");
+#else
+					debug("Connection closed by server (socket=%d) while trying to read the authentication scheme.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Reading authentication scheme from server return socket error %d.\n", errno);
+#else
+					debug("Reading authentication scheme from server (socket=%d) return socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Server (socket=%d) sent authentication scheme.\n", connection);
+			}
+#endif
+
 			auth_type = Swap32IfLE(auth_type);
 			if( auth_type != rfbNoAuth ) {
 				debug("server_listen(): Invalid authentication scheme.\n");
@@ -529,7 +585,11 @@ void *viewer_listen(void *lpParam)
 		} else {
 			/* IP Address for monitoring purposes */
 			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
+#ifndef _DEBUG
 			debug("Viewer connection accepted from %s.\n", ip_addr);
+#else
+			debug("Viewer (socket=%d) connection accepted from %s.\n", connection, ip_addr);
+#endif
 
 			// Act like a server until the authentication phase is over.
 			// Send the protocol version.
@@ -542,10 +602,27 @@ void *viewer_listen(void *lpParam)
 
 			// Read the protocol version the client suggests (Must be 3.3)
 			if( socket_read_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
-				debug("viewer_listen(): Reading protocol version error.\n");
+				if( ( errno == ECONNRESET  ) || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to read protocol version.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Reading protocol version from viewer return socket error %d.\n", errno);
+#else
+					debug("Reading protocol version from viewer (socket=%d) return socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Viewer (socket=%d) sent protocol version.\n", connection);
+			}
+#endif
 
 			// Send Authentication Type (VNC Authentication to keep it standard)
 			auth_type = Swap32IfLE(rfbVncAuth);
@@ -567,10 +644,27 @@ void *viewer_listen(void *lpParam)
 			// It will be treated as the repeater IDentifier.
 			memset(&challenge, 0, CHALLENGESIZE);
 			if( socket_read_exact(connection, (char *)&challenge, CHALLENGESIZE) < 0 ) {
-				debug("viewer_listen(): Reading challenge response error.\n");
+				if( ( errno == ECONNRESET )  || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to read challenge response.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Reading challenge response from viewer return socket error %d.\n", errno);
+#else
+					debug("Reading challenge response from viewer (socket=%d) return socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Viewer (socket=%d) sent challenge response.\n", connection);
+			}
+#endif
 
 			// Send Authentication response
 			auth_response = Swap32IfLE(rfbVncAuthOK);
@@ -582,10 +676,27 @@ void *viewer_listen(void *lpParam)
 
 			// Retrieve ClientInit and save it inside the structure.
 			if( socket_read_exact(connection, (char *)&client_init, sizeof(client_init)) < 0 ) {
-				debug("viewer_listen(): Reading ClientInit message error.\n");
+				if( ( errno == ECONNRESET )  || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to read ClientInit.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Reading ClientInit from viewer return socket error %d.\n", errno);
+#else
+					debug("Reading ClientInit from viewer (socket=%d) return socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
+			} 
+#ifdef _DEBUG
+			else {
+				debug("Viewer (socket=%d) sent ClientInit message.\n", connection);
 			}
+#endif
 
 			// Screws LINUX!
 			//shutdown(thread_params->sock, 2);
@@ -815,7 +926,18 @@ int main(int argc, char **argv)
 #endif
 
 	// Main loop
-	while( notstopped ) { }
+	while( notstopped ) 
+	{ 
+		/* Clean slots: Free slots where the endpoint has disconnected */
+		CleanupSlots();
+		
+		/* Take a "nap" so CPU usage doesn't go up. */
+#ifdef WIN32
+		Sleep( 50 );
+#else
+		usleep( 50 );
+#endif
+	}
 
 	printf("\nExiting VNC Repeater...\n");
 
