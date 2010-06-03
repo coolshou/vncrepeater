@@ -41,6 +41,7 @@
 #include <unistd.h>
 #endif
 
+#include "thread.h"
 #include "sockets.h"
 #include "rfb.h"
 #include "vncauth.h"
@@ -73,15 +74,12 @@ int notstopped;
 int ParseDisplay(char *display, char *phost, int hostlen, char *pport);
 void ExitRepeater(int sig);
 void usage(char * appname);
+THREAD_CALL do_repeater(LPVOID lpParam);
+THREAD_CALL server_listen(LPVOID lpParam);
+THREAD_CALL viewer_listen(LPVOID lpParam);
 #ifdef WIN32
 void ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds);
-DWORD WINAPI do_repeater(LPVOID lpParam);
-DWORD WINAPI server_listen(LPVOID lpParam);
-DWORD WINAPI viewer_listen(LPVOID lpParam);
-#else
-void *do_repeater(void *lpParam);
-void *server_listen(void *lpParam);
-void *viewer_listen(void *lpParam);
+//DWORD WINAPI do_repeater(LPVOID lpParam);
 #endif
 
 
@@ -175,11 +173,8 @@ int ParseDisplay(char *display, char *phost, int hostlen, unsigned char *pport)
  *
  *****************************************************************************/
 
-#ifdef WIN32
-DWORD WINAPI do_repeater(LPVOID lpParam)
-#else
-void *do_repeater(void *lpParam) 
-#endif
+THREAD_CALL 
+do_repeater(LPVOID lpParam)
 {
 	/** vars for viewer input data **/
 	char viewerbuf[1024];        /* viewer input buffer */
@@ -352,11 +347,8 @@ void *do_repeater(void *lpParam)
 
 
 
-#ifdef WIN32
-DWORD WINAPI server_listen(LPVOID lpParam)
-#else
-void *server_listen(void *lpParam) 
-#endif
+THREAD_CALL
+server_listen(LPVOID lpParam)
 {
 	listener_thread_params *thread_params;
 	SOCKET connection;
@@ -370,11 +362,7 @@ void *server_listen(void *lpParam)
 	repeaterslot *slot;
 	repeaterslot *current;
 	char * ip_addr;
-#ifdef WIN32
-	DWORD dwThreadId;
-#else
-	pthread_t repeater_thread; 
-#endif
+	thread_t repeater_thread; 
 
 	thread_params = (listener_thread_params *)lpParam;
 	thread_params->sock = CreateListenerSocket( thread_params->port );
@@ -388,10 +376,11 @@ void *server_listen(void *lpParam)
 	while( notstopped )
 	{
 		connection = socket_accept(thread_params->sock, &client, &socklen);
-	
-		if( connection < 0 ) {
+		if( connection == INVALID_SOCKET ) {
 			if( notstopped )
 				debug("server_listen(): accept() failed, errno=%d\n", errno);
+			else
+				break;
 		} else {
 			/* IP Address for monitoring purposes */
 			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
@@ -461,11 +450,28 @@ void *server_listen(void *lpParam)
 
 			// Tell the server we are using Protocol Version 3.3
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
-			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
-				debug("server_listen(): Writting protocol version error.\n");
+			if( socket_write_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
+				if( ( errno == ECONNRESET  ) || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by server.\n");
+#else
+					debug("Connection closed by server (socket=%d) while trying to write protocol version.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Writting protocol version to server returned socket error %d.\n", errno);
+#else
+					debug("Writting protocol version to server (socket=%d) returned socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close(connection);
 				continue;
+			} 
+#ifdef _DEBUG
+			else {
+				debug("Protocol version sent to server (socket=%d).\n", connection);
 			}
+#endif
 
 			// The server should send the authentication type it whises to use.
 			// ToDo: We could add a password this would restrict other servers from
@@ -496,7 +502,11 @@ void *server_listen(void *lpParam)
 
 			auth_type = Swap32IfLE(auth_type);
 			if( auth_type != rfbNoAuth ) {
-				debug("server_listen(): Invalid authentication scheme.\n");
+#ifndef _DEBUG
+				debug("Invalid authentication scheme sent by server.\n");
+#else
+				debug("Invalid authentication scheme sent by server (socket=%d).\n", connection);
+#endif
 				socket_close( connection );
 				continue;
 			}
@@ -510,7 +520,7 @@ void *server_listen(void *lpParam)
 			memset(slot, 0, sizeof(repeaterslot));
 
 			slot->server = connection;
-			//slot->viewer = INVALID_SOCKET;
+			slot->viewer = INVALID_SOCKET;
 			slot->timestamp = (unsigned long)time(NULL);
 			memcpy(slot->challenge, challenge, CHALLENGESIZE);
 			slot->next = NULL;
@@ -520,12 +530,20 @@ void *server_listen(void *lpParam)
 				free( slot );
 				socket_close( connection );
 				continue;
-			} else if( ( current->viewer > 0 ) && ( current->server > 0 ) ) {
+			} else if( ( current->viewer != INVALID_SOCKET ) && ( current->server != INVALID_SOCKET ) ) {
 				// Thread...
-#ifdef WIN32
-				CreateThread(NULL, 0, do_repeater, (LPVOID)current, 0, &dwThreadId);
+				// ToDo: repeater_thread should be stored inside the slot in order to access it
+				if( notstopped ) {
+					if( thread_create(&repeater_thread, NULL, do_repeater, (LPVOID)current) != 0 ) {
+						fatal("Unable to create the repeater thread.\n");
+						notstopped = 0;
+					}
+				}
+			} else {
+#ifndef _DEBUG
+				debug("Server waiting for viewer to connect...\n");
 #else
-				pthread_create(&repeater_thread, NULL, do_repeater, (void *)current); 
+				debug("Server (socket=%d) waiting for viewer to connect...\n", current->server);
 #endif
 			}
 		}
@@ -542,11 +560,8 @@ void *server_listen(void *lpParam)
 
 
 
-#ifdef WIN32
-DWORD WINAPI viewer_listen(LPVOID lpParam)
-#else
-void *viewer_listen(void *lpParam) 
-#endif
+THREAD_CALL
+viewer_listen(LPVOID lpParam)
 {
 	listener_thread_params *thread_params;
 	SOCKET connection;
@@ -560,11 +575,7 @@ void *viewer_listen(void *lpParam)
 	repeaterslot *slot;
 	repeaterslot *current;
 	char * ip_addr;
-#ifdef WIN32
-	DWORD dwThreadId;
-#else
-	pthread_t repeater_thread; 
-#endif
+	thread_t repeater_thread; 
 
 	thread_params = (listener_thread_params *)lpParam;
 	thread_params->sock = CreateListenerSocket( thread_params->port );
@@ -579,9 +590,11 @@ void *viewer_listen(void *lpParam)
 	while( notstopped )
 	{
 		connection = socket_accept(thread_params->sock, &client, &socklen);
-		if( connection < 0 ) {
-			if( notstopped )
+		if( connection == INVALID_SOCKET ) {
+			if( notstopped ) 
 				debug("viewer_listen(): accept() failed, errno=%d\n", errno);
+			else 
+				break;
 		} else {
 			/* IP Address for monitoring purposes */
 			ip_addr = inet_ntoa( ((struct sockaddr_in *)&client)->sin_addr );
@@ -594,11 +607,29 @@ void *viewer_listen(void *lpParam)
 			// Act like a server until the authentication phase is over.
 			// Send the protocol version.
 			sprintf(protocol_version, rfbProtocolVersionFormat, rfbProtocolMajorVersion, rfbProtocolMinorVersion);
-			if( WriteExact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
-				debug("viewer_listen(): Writting protocol version error.\n");
+			if( socket_write_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
+				if( ( errno == ECONNRESET  ) || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to write protocol version.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Writting protocol version to viewer returned socket error %d.\n", errno);
+#else
+					debug("Writting protocol version to viewer (socket=%d) returned socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Protocol version sent to viewer (socket=%d).\n", connection);
+			}
+#endif
+
 
 			// Read the protocol version the client suggests (Must be 3.3)
 			if( socket_read_exact(connection, protocol_version, sz_rfbProtocolVersionMsg) < 0 ) {
@@ -610,9 +641,9 @@ void *viewer_listen(void *lpParam)
 #endif
 				} else {
 #ifndef _DEBUG
-					debug("Reading protocol version from viewer return socket error %d.\n", errno);
+					debug("Reading protocol version from viewer returned socket error %d.\n", errno);
 #else
-					debug("Reading protocol version from viewer (socket=%d) return socket error %d.\n", connection, errno);
+					debug("Reading protocol version from viewer (socket=%d) returned socket error %d.\n", connection, errno);
 #endif
 				}
 				socket_close( connection );
@@ -626,19 +657,53 @@ void *viewer_listen(void *lpParam)
 
 			// Send Authentication Type (VNC Authentication to keep it standard)
 			auth_type = Swap32IfLE(rfbVncAuth);
-			if( WriteExact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
-				debug("viewer_listen(): Writting authentication type error.\n");
+			if( socket_write_exact(connection, (char *)&auth_type, sizeof(auth_type)) < 0 ) {
+				if( ( errno == ECONNRESET  ) || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to write authentication scheme.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Writting authentication scheme to viewer returned socket error %d.\n", errno);
+#else
+					debug("Writting authentication scheme to viewer (socket=%d) returned socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Authentication scheme sent to viewer (socket=%d).\n", connection);
+			}
+#endif
 
 			// We must send the 16 bytes challenge key.
 			// In order for this to work the challenge must be always the same.
-			if( WriteExact(connection, (char *)&challenge_key, CHALLENGESIZE) < 0 ) {
-				debug("viewer_listen(): Writting challenge error.\n");
+			if( socket_write_exact(connection, (char *)&challenge_key, CHALLENGESIZE) < 0 ) {
+				if( ( errno == ECONNRESET  ) || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to write challenge key.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Writting challenge key to viewer returned socket error %d.\n", errno);
+#else
+					debug("Writting challenge key to viewer (socket=%d) returned socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Challenge sent to viewer (socket=%d).\n", connection );
+			}
+#endif
 
 			// Read the password.
 			// It will be treated as the repeater IDentifier.
@@ -668,11 +733,28 @@ void *viewer_listen(void *lpParam)
 
 			// Send Authentication response
 			auth_response = Swap32IfLE(rfbVncAuthOK);
-			if( WriteExact(connection, (char *)&auth_response, sizeof(auth_response)) < 0 ) {
-				debug("viewer_listen(): Writting authentication response error.\n");
+			if( socket_write_exact(connection, (char *)&auth_response, sizeof(auth_response)) < 0 ) {
+				if( ( errno == ECONNRESET  ) || ( errno == ENOTCONN ) ) {
+#ifndef _DEBUG
+					debug("Connection closed by viewer.\n");
+#else
+					debug("Connection closed by viewer (socket=%d) while trying to write authentication response.\n", connection);
+#endif
+				} else {
+#ifndef _DEBUG
+					debug("Writting authentication response to viewer returned socket error %d.\n", errno);
+#else
+					debug("Writting authentication response to viewer (socket=%d) returned socket error %d.\n", connection, errno);
+#endif
+				}
 				socket_close( connection );
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Authentication response sent to viewer (socket=%d).\n", connection);
+			}
+#endif
 
 			// Retrieve ClientInit and save it inside the structure.
 			if( socket_read_exact(connection, (char *)&client_init, sizeof(client_init)) < 0 ) {
@@ -705,7 +787,7 @@ void *viewer_listen(void *lpParam)
 			slot = (repeaterslot *)malloc( sizeof(repeaterslot) );
 			memset(slot, 0, sizeof(repeaterslot));
 
-			//slot->server = INVALID_SOCKET;
+			slot->server = INVALID_SOCKET;
 			slot->viewer = connection;
 			slot->timestamp = (unsigned long)time(NULL);
 			memcpy(slot->challenge, challenge, CHALLENGESIZE);
@@ -716,12 +798,20 @@ void *viewer_listen(void *lpParam)
 				free( slot );
 				socket_close( connection );
 				continue;
-			} else if( ( current->server > 0 ) && ( current->viewer > 0 ) ) {
+			} else if( ( current->server != INVALID_SOCKET ) && ( current->viewer != INVALID_SOCKET ) ) {
 				// Thread...
-#ifdef WIN32
-				CreateThread(NULL, 0, do_repeater, (LPVOID)current, 0, &dwThreadId);
+				// ToDo: repeater_thread should be stored inside the slot in order to access it
+				if( notstopped ) {
+					if( thread_create(&repeater_thread, NULL, do_repeater, (LPVOID)current) != 0 ) {
+						fatal("Unable to create the repeater thread.\n");
+						notstopped = 0;
+					}
+				}
+			} else {
+#ifndef _DEBUG
+				debug("Viewer waiting for server to connect...\n");
 #else
-				pthread_create(&repeater_thread, NULL, do_repeater, (void *)current); 
+				debug("Viewer (socket=%d) waiting for server to connect...\n", current->viewer);
 #endif
 			}
 		}
@@ -735,37 +825,6 @@ void *viewer_listen(void *lpParam)
 #endif
 	return 0;
 }
-
-
-
-#ifdef WIN32
-
-void
-ThreadCleanup(HANDLE hThread, DWORD dwMilliseconds)
-{
-	/* Wait for the threads to complete... */
-	switch( WaitForSingleObject(hThread, 10000) )
-	{
-		case WAIT_OBJECT_0 :
-			/* Thread exited */
-			CloseHandle( hThread );
-			break;
-		case WAIT_TIMEOUT :
-			/* Timeout elapsed, thread still running */
-			TerminateThread( hThread, 0 );
-			CloseHandle( hThread );
-#ifdef _DEBUG
-			error("Thread timed out (Please check what could be wrong).\n");
-#endif
-			break;
-#ifdef _DEBUG
-		default:
-			error("Something went REALLY wrong while waiting for a thread to complete!\n");
-#endif
-	};
-}
-
-#endif
 
 
 
@@ -802,16 +861,9 @@ int main(int argc, char **argv)
 	listener_thread_params *viewer_thread_params;
 	u_short server_port;
 	u_short viewer_port;
-#ifdef WIN32
-	// Windows Threads
-	DWORD dwThreadId;
-	HANDLE hServerThread;
-	HANDLE hViewerThread;
-#else
-	// POSIX Threads
-	pthread_t hServerThread;
-	pthread_t hViewerThread;
-#endif
+	int t_result;
+	thread_t hServerThread;
+	thread_t hViewerThread;
 
 	/* Load configuration file */
 	if( GetConfigurationPort("ServerPort", &server_port) == 0 )
@@ -897,33 +949,31 @@ int main(int argc, char **argv)
 
 
 	// Start multithreading...
-#ifdef WIN32
-
-	if( notstopped ) {
-		hServerThread = CreateThread(NULL, 0, server_listen, (LPVOID)server_thread_params, 0, &dwThreadId);
-		if( hServerThread == NULL ) {
-			error("Unable to create the thread to listen for servers.\n");
-			notstopped = 0;
-		}
-	}
-
-	if( notstopped ) {
-		hViewerThread = CreateThread(NULL, 0, viewer_listen, (LPVOID)viewer_thread_params, 0, &dwThreadId);
-		if( hServerThread == NULL ) {
-			error("Unable to create the thread to listen for servers.\n");
-			notstopped = 0;
-		}
-	}
+	// Initialize MutEx
+	t_result = mutex_init( &mutex_slots, NULL );
+	if( t_result != 0 ) {
+#ifndef _DEBUG
+		error("Failed to create mutex with error: %d\n", t_result );
 #else
-	// POSIX THREADS
+		error("Failed to create mutex for repeater slots with error: %d\n", t_result );
+#endif
+		notstopped = 0;
+	}
+
+	// Tying new threads ;)
 	if( notstopped ) {
-		pthread_create(&hServerThread, NULL, server_listen, (void *)server_thread_params); 
+		if( thread_create(&hServerThread, NULL, server_listen, (LPVOID)server_thread_params) != 0 ) {
+			fatal("Unable to create the thread to listen for servers.\n");
+			notstopped = 0;
+		}
 	}
 
 	if( notstopped ) {
-		pthread_create(&hViewerThread, NULL, viewer_listen, (void *)viewer_thread_params); 
+		if( thread_create(&hViewerThread, NULL, viewer_listen, (LPVOID)viewer_thread_params) != 0 ) {
+			fatal("Unable to create the thread to listen for viewers.\n");
+			notstopped = 0;
+		}
 	}
-#endif
 
 	// Main loop
 	while( notstopped ) 
@@ -955,14 +1005,28 @@ int main(int argc, char **argv)
 	free( viewer_thread_params );
 
 	/* Make sure the threads have finalized */
-#ifdef WIN32
-	ThreadCleanup( hServerThread, 10000 );
-	ThreadCleanup( hViewerThread, 10000 );
+	if( thread_cleanup( hServerThread, 30) != 0 ) {
+		error("The server listener thread doesn't seem to exit cleanlly.\n");
+	}
+	if( thread_cleanup( hViewerThread, 30) != 0 ) {
+		error("The viewer listener thread doesn't seem to exit cleanlly.\n");
+	}
 
-	// Cleanup Winsock.
-	WinsockFinalize();
+
+
+	 // Destroy mutex
+	 t_result = mutex_destroy( &mutex_slots );
+	 if( t_result != 0 ) {
+#ifndef _DEBUG
+		 error("Failed to destroy mutex with error: %d\n", t_result);
 #else
-	// CLEANUP POSIX THREADS
+		 error("Failed to destroy mutex for repeater slots with error: %d\n", t_result);
+#endif
+	 }
+
+#ifdef WIN32
+	 // Cleanup Winsock.
+	WinsockFinalize();
 #endif
 
 	return 0;

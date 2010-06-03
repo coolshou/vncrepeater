@@ -38,6 +38,54 @@ unsigned int max_slots;
 
 unsigned char challenge_key[CHALLENGESIZE];
 
+mutex_t mutex_slots;
+
+/*******************************************************************************
+ *
+ * Do NOT touch my slots without asking!
+ *
+ ******************************************************************************/
+int 
+LockSlots(const char * function_name)
+{
+	int mutex_result;
+
+	mutex_result = mutex_lock( &mutex_slots );
+	if( mutex_result != 0 ) {
+#ifndef _DEBUG
+		error("Failed to lock mutex with error %d.\n", mutex_result);
+#else
+		error("Failed to lock mutex in %s with error %d.", function_name, mutex_result);
+#endif
+		return -1;
+	}
+
+	return 0;
+}
+
+/*******************************************************************************
+ *
+ * Alright... You may touch my slots...
+ *
+ ******************************************************************************/
+int 
+UnlockSlots(const char * function_name)
+{
+	int mutex_result;
+
+	mutex_result = mutex_unlock( &mutex_slots );
+	if( mutex_result != 0 ) {
+#ifndef _DEBUG
+		error("Failed to unlock mutex with error %d.\n", mutex_result);
+#else
+		error("Failed to unlock mutex in %s with error %d.", function_name, mutex_result);
+#endif
+		/* Damn! If we can not unlock he mutex we are in trouble! */
+		notstopped = 0;
+		return -1;
+	}
+	return 0;
+}
 
 
 int
@@ -94,11 +142,14 @@ FreeSlots( void )
 {
 	repeaterslot *current;
 
+	if( LockSlots("FreeSlots()") != 0 )
+		return;
+
 	current = Slots;
 	while( current != NULL )
 	{
 		/* Close server connection */
-		if( current->server > 0 ) {
+		if( current->server != INVALID_SOCKET ) {
 			shutdown( current->server, 2);
 			if( socket_close( current->server ) == -1 ) {
 				error("Server socket failed to close. Socket error = %d.\n", errno);
@@ -111,7 +162,7 @@ FreeSlots( void )
 		}
 
 		/* Close viewer connection */
-		if( current->viewer > 0 ) {
+		if( current->viewer != INVALID_SOCKET ) {
 			shutdown( current->viewer, 2);
 			if( socket_close( current->viewer ) == -1 ) {
 				error("Viewer socket failed to close. Socket error = %d.\n", errno);
@@ -135,6 +186,8 @@ FreeSlots( void )
 		fatal("Failed to free repeater slots.\n");
 		slotCount = 0;
 	}
+
+	UnlockSlots("FreeSlots()");
 }
 
 
@@ -143,15 +196,21 @@ repeaterslot *
 AddSlot(repeaterslot *slot)
 {
 	repeaterslot *current;
+	
+	if( LockSlots("AddSlot()") != 0 )
+		return NULL;
 
-	if( ( slot->server <= 0 ) && ( slot->viewer <= 0 ) ) {
+	if( ( slot->server == INVALID_SOCKET ) && ( slot->viewer == INVALID_SOCKET ) ) {
 		error("Trying to allocate an empty slot.\n");
+		UnlockSlots("AddSlot()");
 		return NULL;
 	} else if( slot->next != NULL ) {
 		error("Memory allocation problem detected while trying to add a slot.\n");
+		UnlockSlots("AddSlot()");
 		return NULL;
 	} else if( ( max_slots > 0 ) && (max_slots == slotCount) ) {
 		error("All the slots are in use.\n");
+		UnlockSlots("AddSlot()");
 		return NULL;
 	}
 
@@ -163,6 +222,10 @@ AddSlot(repeaterslot *slot)
 			Slots->next = NULL;
 			slotCount++;
 		}
+		UnlockSlots("AddSlot()");
+#ifdef _DEBUG
+		debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 		return Slots;
 	} else {
 		current = FindSlotByChallenge( slot->challenge );
@@ -171,17 +234,35 @@ AddSlot(repeaterslot *slot)
 			slot->next = Slots;
 			Slots = slot;
 			slotCount++;
+			UnlockSlots("AddSlot()");
+#ifdef _DEBUG
+			debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 			return Slots;
-		} else if( current->server <= 0 ) {
+		} else if( current->server == INVALID_SOCKET ) {
 			current->server = slot->server;
-		} else if( current->viewer <= 0 ) {
+		} else if( current->viewer == INVALID_SOCKET ) {
 			current->viewer = slot->viewer;
 		} else {
+			UnlockSlots("AddSlot()");
+#ifdef _DEBUG
+			debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 			return NULL;
 		}
 
+		UnlockSlots("AddSlot()");
+#ifdef _DEBUG
+			debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 		return current;
 	}
+
+	/* Unrecheable code, but just in case... */
+	UnlockSlots("AddSlot()");
+#ifdef _DEBUG
+	debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 }
 
 /* Free any slot if the connection has been reseted by peer */
@@ -196,6 +277,9 @@ CleanupSlots( void )
 	BYTE buf;
 	int num_bytes;
 
+	if( LockSlots("CleanupSlots()") != 0 )
+		return;
+
 	current = Slots;
 	previous = NULL;
 	tm.tv_sec=0;
@@ -203,11 +287,10 @@ CleanupSlots( void )
 
 	while( current != NULL )
 	{
-		/* " <= 0 " should be " == INVALID_SOCKET" but this fails somehow :( */
-		if( ( current->viewer <= 0 ) || ( current->server <= 0 ) ) {
+		if( ( current->viewer == INVALID_SOCKET ) || ( current->server == INVALID_SOCKET ) ) {
 			FD_ZERO( &read_fds );
 			
-			if( current->viewer <= 0 ) {
+			if( current->viewer == INVALID_SOCKET ) {
 				/* check the server connection */
 				FD_SET( current->server , &read_fds );
 				if( select( current->server + 1, &read_fds, NULL, NULL, &tm) == 0 ) {
@@ -246,7 +329,7 @@ CleanupSlots( void )
 					current = current->next;
 					continue;
 				}
-			} else if( current->server <= 0 ) {
+			} else if( current->server == INVALID_SOCKET ) {
 				/* Check the viewer connection */
 				FD_SET( current->viewer , &read_fds );
 				if( select( current->viewer + 1, &read_fds, NULL, NULL, &tm) == 0 ) {
@@ -297,8 +380,9 @@ CleanupSlots( void )
 			socket_close( current->viewer );
 			free( current );
 			current = next;
+			slotCount--;
 #ifdef _DEBUG
-			debug("Slot has been freed.\n");
+			debug("Slot has been freed. Allocated repeater slots: %d.\n", slotCount);
 #endif
 		} else {
 			previous = current;
@@ -306,6 +390,8 @@ CleanupSlots( void )
 			continue;
 		}
 	}
+
+	UnlockSlots("CleanupSlots()");
 }
 
 
@@ -313,6 +399,9 @@ repeaterslot *
 FindSlotByChallenge(unsigned char * challenge)
 {
 	repeaterslot *current;
+
+	if( LockSlots("FindSlotByChallenge()") != 0 )
+		return NULL;
 
 	current = Slots;
 #ifdef _DEBUG
@@ -325,6 +414,7 @@ FindSlotByChallenge(unsigned char * challenge)
 #ifdef _DEBUG
 			debug("Found a slot assigned to the given challenge ID.\n");
 #endif
+			UnlockSlots("FindSlotByChallenge()");
 			return current;
 		}
 		current = current->next;
@@ -333,6 +423,7 @@ FindSlotByChallenge(unsigned char * challenge)
 #ifdef _DEBUG
 	debug("Failed to find an assigned slot for the given Challenge ID. Probably a new ID.\n");
 #endif
+	UnlockSlots("FindSlotByChallenge()");
 	return NULL;
 }
 
@@ -344,8 +435,15 @@ FreeSlot(repeaterslot *slot)
 	repeaterslot *current;
 	repeaterslot *previous;
 
+	if( LockSlots("FreeSlot()") != 0 )
+		return;
+
 	if( Slots == NULL ) {
 		debug("There are no slots to be freed.\n");
+		UnlockSlots("FreeSlot()");
+#ifdef _DEBUG
+		debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 		return;
 	}
 
@@ -353,7 +451,8 @@ FreeSlot(repeaterslot *slot)
 	previous = NULL;
 
 #ifdef _DEBUG
-	debug("Trying to free slot...\n");
+	debug("Trying to free slot... (Allocated repeater slots: %d)\n", slotCount);
+
 #endif
 	while( current != NULL )
 	{
@@ -363,7 +462,7 @@ FreeSlot(repeaterslot *slot)
 			debug("Slots found. Trying to free resources.\n");
 #endif
 			/* Close server socket */
-			if( slot->server >= 0 ) {
+			if( slot->server != INVALID_SOCKET ) {
 				shutdown( slot->server, 2 );
 				if( socket_close( slot->server ) == -1 ) {
 					error("Server socket failed to close. Socket error = %d\n", errno);
@@ -376,7 +475,7 @@ FreeSlot(repeaterslot *slot)
 			}
 
 			/* Close Viewer Socket */
-			if( slot->viewer >= 0 ) {
+			if( slot->viewer != INVALID_SOCKET ) {
 				shutdown( slot->viewer, 2 );
 				if( socket_close( slot->viewer ) == -1 ) {
 					error("Viewer socket failed to close. Socket error = %d\n", errno);
@@ -398,6 +497,10 @@ FreeSlot(repeaterslot *slot)
 #ifdef _DEBUG
 			debug("Slot has been freed.\n");
 #endif
+			UnlockSlots("FreeSlot()");
+#ifdef _DEBUG
+			debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 			return;
 		}
 
@@ -406,44 +509,9 @@ FreeSlot(repeaterslot *slot)
 	}
 
 	fatal("Called FreeSlot() but no slot was found.\n");
+	UnlockSlots("FreeSlot()");
+#ifdef _DEBUG
+	debug("Allocated repeater slots: %d.\n", slotCount);
+#endif
 }
 
-
-void DeleteSlotByChallenge(unsigned char * challenge)
-{
-	repeaterslot *current;
-	repeaterslot *previous;
-
-	current = Slots;
-	previous = NULL;
-
-	while( current != NULL)
-	{
-		if( memcmp(challenge, current->challenge, CHALLENGESIZE) == 0 ) {
-			/* Close server connection */
-			if( current->server > 0 ) {
-				shutdown( current->server, 2 );
-				socket_close( current->server );
-			}
-
-			/* Close viewer connection */
-			if( current->viewer > 0 ) {
-				shutdown( current->viewer, 2 );
-				socket_close( current->viewer );
-			}
-
-			if( previous == NULL )
-				previous->next = current->next;
-			else
-				Slots = current->next;
-				
-			free( current );
-			slotCount--;
-
-			return;
-		}
-
-		current = current->next;
-		previous = current;
-	}
-}

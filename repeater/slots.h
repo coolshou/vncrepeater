@@ -19,8 +19,12 @@
 //
 /////////////////////////////////////////////////////////////////////////////
 
+
 #ifndef _SLOTS_H
 #define _SLOTS_H
+
+#include "mutex.h"
+
 
 typedef struct _repeaterslot
 {
@@ -36,6 +40,8 @@ typedef struct _repeaterslot
 extern repeaterslot * Slots;
 
 extern unsigned char challenge_key[CHALLENGESIZE];
+
+extern mutex_t mutex_slots;
 
 /* Prototypes */
 void InitializeSlots( unsigned int max );

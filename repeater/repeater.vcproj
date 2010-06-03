@@ -182,6 +182,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\mutex.cpp"
+				>
+			</File>
+			<File
 				RelativePath=".\repeater.cpp"
 				>
 			</File>
@@ -191,6 +195,10 @@
 			</File>
 			<File
 				RelativePath=".\sockets.cpp"
+				>
+			</File>
+			<File
+				RelativePath=".\thread.cpp"
 				>
 			</File>
 			<File
@@ -212,6 +220,10 @@
 				>
 			</File>
 			<File
+				RelativePath=".\mutex.h"
+				>
+			</File>
+			<File
 				RelativePath=".\repeater.h"
 				>
 			</File>
@@ -229,6 +241,10 @@
 			</File>
 			<File
 				RelativePath=".\sockets.h"
+				>
+			</File>
+			<File
+				RelativePath=".\thread.h"
 				>
 			</File>
 			<File

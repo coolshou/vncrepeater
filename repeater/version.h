@@ -23,9 +23,9 @@
 #define _VERSION_H
 
 #ifndef _DEBUG
-#define VNCREPEATER_VERSION "0.1.21"
+#define VNCREPEATER_VERSION "0.1.23"
 #else
-#define VNCREPEATER_VERSION "0.1.21 - Debug mode"
+#define VNCREPEATER_VERSION "0.1.23 - Debug mode"
 #endif
 
 #endif
