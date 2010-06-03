@@ -19,9 +19,22 @@
 //
 /////////////////////////////////////////////////////////////////////////////
 
-void debug(const char *fmt, ...);
-void error( const char *fmt, ...);
-void fatal(const char *fmt, ...);
-void report_bytes(char *prefix, char *buf, int len);
+#ifndef _MUTEX_H
+#define _MUTEX_H
 
-extern int notstopped;
+#ifdef WIN32
+#define mutex_t HANDLE
+#define mutexattr_t LPSECURITY_ATTRIBUTES
+#else
+#define mutex_t pthread_mutex_t
+#define mutexattr_t pthread_mutexattr_t
+#endif
+
+
+/* Prototypes */
+int mutex_destroy( mutex_t * mutex );
+int mutex_init(mutex_t * mutex, mutexattr_t * attr);
+int mutex_lock( mutex_t * mutex);
+int mutex_unlock( mutex_t * mutex );
+
+#endif

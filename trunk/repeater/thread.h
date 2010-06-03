@@ -19,9 +19,33 @@
 //
 /////////////////////////////////////////////////////////////////////////////
 
-void debug(const char *fmt, ...);
-void error( const char *fmt, ...);
-void fatal(const char *fmt, ...);
-void report_bytes(char *prefix, char *buf, int len);
+#ifndef _THREAD_H
+#define _THREAD_H
 
-extern int notstopped;
+#ifdef WIN32
+/* WINDOWS */
+#include <windows.h>
+
+#define thread_t HANDLE
+#define LPTHREAD_SECURITY_ATTRIBUTES LPSECURITY_ATTRIBUTES
+#define THREAD_CALL DWORD WINAPI 
+#else
+/* LINUX*/
+#include <pthread.h>
+
+#define thread_t pthread_t
+#define LPVOID void * 
+#define LPTHREAD_SECURITY_ATTRIBUTES const pthread_attr_t *
+#define THREAD_CALL void * 
+#endif
+
+int thread_cleanup(thread_t thread, unsigned int seconds);
+#ifdef WIN32
+int thread_create(thread_t * thread, LPTHREAD_SECURITY_ATTRIBUTES attr, LPTHREAD_START_ROUTINE start_routine, LPVOID arg);
+#else
+int thread_create(thread_t * thread, LPTHREAD_SECURITY_ATTRIBUTES attr, void *(*start_routine)(void *), LPVOID arg);
+#endif
+int thread_join( thread_t thread, unsigned int seconds);
+int thread_terminate(thread_t thread);
+
+#endif

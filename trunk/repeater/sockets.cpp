@@ -179,7 +179,7 @@ socket_read_exact(SOCKET s, char * buff, socklen_t bufflen)
 	int count;
 
 	while (currlen > 0) {
-		// Wait until some data can be read or sent
+		// Wait until some data can be read
 		do {
 			FD_ZERO( &read_fds );
 			FD_SET( s, &read_fds );
@@ -225,6 +225,45 @@ socket_read_exact(SOCKET s, char * buff, socklen_t bufflen)
 	return 0;
 }
 
+int 
+socket_write_exact(SOCKET s, char * buff, socklen_t bufflen)
+{
+	socklen_t currlen = bufflen;
+	fd_set write_fds;
+	struct timeval tm;
+	int n;
+
+	while (currlen > 0) {
+		// Wait until some data can be read
+		do {
+			FD_ZERO( &write_fds );
+			FD_SET( s, &write_fds );
+			
+			tm.tv_sec = 0;
+			tm.tv_usec = 50;
+			n = select( s + 1, NULL, &write_fds, NULL, &tm);
+		} while (n == 0);
+
+		n = send( s, buff, bufflen, 0);
+
+		if (n > 0) {
+			buff += n;
+			currlen -= n;
+		} else if (n == 0) {
+			error("WriteExact: write returned 0?\n");
+			return -1;
+		} else {
+			/* Negative value. This is an error! */
+#ifdef WIN32
+			errno = WSAGetLastError();
+#endif
+			return -1;
+		}
+	}
+
+	return 1;
+}
+
 
 
 SOCKET 
@@ -239,37 +278,42 @@ socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen)
 	u_long ioctlsocket_arg = 1;
 #endif
 
-	if( ( sock = accept(s, addr, addrlen) ) < 0 ) {
+	sock = INVALID_SOCKET;
+
+	if( ( sock = accept(s, addr, addrlen) ) == INVALID_SOCKET ) {
 #ifdef WIN32
 		errno = WSAGetLastError();
 #endif
-		return -1;
+		return INVALID_SOCKET;
 	}
 
 	// Attempt to set the new socket's options
 	// Disable Nagle Algorithm
-#ifndef _DEBUG
-	setsockopt( sock, IPPROTO_TCP, TCP_NODELAY, (char *)&one, sizeof(one));
-#else
 	if( setsockopt( sock, IPPROTO_TCP, TCP_NODELAY, (char *)&one, sizeof(one)) == -1 ) {
+#ifdef WIN32
+		errno = WSAGetLastError();
+#endif
+		if( errno == ENOTSOCK )
+			return INVALID_SOCKET;
+#ifndef _DEBUG
 		debug("Failed to disable Nagle Algorithm.\n");
 	} else {
-		debug("Nagle Algoritmh has been disabled.\n");
-	}
+		debug("Nagle Alorithm has been disabled.\n");
 #endif
+	}
 
 	// Put the socket into non-blocking mode
 #ifdef WIN32
 	if (ioctlsocket( sock, FIONBIO, &ioctlsocket_arg) != 0) {
 		error("Failed to set socket in non-blocking mode.\n");
 		socket_close( sock );
-		return -1;
+		return INVALID_SOCKET;
 	}
 #else
 	if (fcntl( sock, F_SETFL, O_NDELAY) != 0) {
 		error("Failed to set socket in non-blocking mode.\n");
 		socket_close( sock );
-		return -1;
+		return INVALID_SOCKET;
 	}
 #endif
 

@@ -60,6 +60,10 @@
 #define ECONNRESET WSAECONNRESET 
 #endif
 
+#ifndef ENOTSOCK
+#define ENOTSOCK WSAENOTSOCK
+#endif
+
 #ifndef FD_ALLOC
 #define FD_ALLOC(nfds) ((fd_set*)malloc((nfds+7)/8))
 #endif 
@@ -96,3 +100,4 @@ SOCKET socket_accept(SOCKET s, struct sockaddr * addr, socklen_t * addrlen);
 int socket_close(SOCKET s);
 int socket_read(SOCKET s, char * buff, socklen_t bufflen);
 int socket_read_exact(SOCKET s, char * buff, socklen_t bufflen);
+int socket_write_exact(SOCKET s, char * buff, socklen_t bufflen);
