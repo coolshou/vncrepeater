@@ -180,13 +180,16 @@ do_repeater(LPVOID lpParam)
 	char viewerbuf[1024];        /* viewer input buffer */
 	unsigned int viewerbuf_len;  /* available data in viewerbuf */
 	int f_viewer;                /* read viewer input more? */ 
+
 	/** vars for server input data **/
 	char serverbuf[1024];        /* server input buffer */
 	unsigned int serverbuf_len;  /* available data in serverbuf */
 	int f_server;                /* read server input more? */
+
 	/** other variables **/
 	int nfds, len;
-	fd_set *ifds, *ofds; 
+	fd_set ifds;
+	fd_set ofds; 
 	CARD8 client_init;
 	repeaterslot *slot;
 	struct timeval tm;
@@ -212,8 +215,10 @@ do_repeater(LPVOID lpParam)
 	} else {
 		/* repeater between stdin/out and socket  */
 		nfds = ((slot->viewer < slot->server) ? slot->server : slot->viewer) + 1;
-		ifds = FD_ALLOC(nfds);
-		ofds = FD_ALLOC(nfds);
+
+		viewerbuf_len = 0;
+		serverbuf_len = 0;
+
 		f_viewer = 1;              /* yes, read from viewer */
 		f_server = 1;              /* yes, read from server */
 	}
@@ -223,20 +228,20 @@ do_repeater(LPVOID lpParam)
 	{
 		/* Bypass reading if there is still data to be sent in the buffers */
 		if( ( serverbuf_len == 0 ) && ( viewerbuf_len == 0 ) ) {
-			FD_ZERO(ifds);
-			FD_ZERO(ofds); 
+			FD_ZERO( &ifds );
+			FD_ZERO( &ofds ); 
 
 			/** prepare for reading viewer input **/ 
 			if (f_viewer && (viewerbuf_len < sizeof(viewerbuf))) {
-				FD_SET(slot->viewer, ifds);
+				FD_SET(slot->viewer, &ifds);
 			} 
 
 			/** prepare for reading server input **/
 			if (f_server && (serverbuf_len < sizeof(serverbuf))) {
-				FD_SET(slot->server, ifds);
+				FD_SET(slot->server, &ifds);
 			} 
 
-			selres = select(nfds, ifds, ofds, NULL, &tm);
+			selres = select(nfds, &ifds, &ofds, NULL, &tm);
 			if( selres == -1 ) {
 				/* some error */
 				error("do_repeater(): select() failed, errno=%d\n", errno);
@@ -250,7 +255,7 @@ do_repeater(LPVOID lpParam)
 		
 
 			/* server => viewer */ 
-			if (FD_ISSET(slot->server, ifds) && (serverbuf_len < sizeof(serverbuf))) { 
+			if (FD_ISSET(slot->server, &ifds) && (serverbuf_len < sizeof(serverbuf))) { 
 				len = recv(slot->server, serverbuf + serverbuf_len, sizeof(serverbuf) - serverbuf_len, 0); 
 
 				if (len == 0) { 
@@ -272,7 +277,7 @@ do_repeater(LPVOID lpParam)
 			}
 
 			/* viewer => server */ 
-			if( FD_ISSET(slot->viewer, ifds)  && (viewerbuf_len < sizeof(viewerbuf)) ) {
+			if( FD_ISSET(slot->viewer, &ifds)  && (viewerbuf_len < sizeof(viewerbuf)) ) {
 				len = recv(slot->viewer, viewerbuf + viewerbuf_len, sizeof(viewerbuf) - viewerbuf_len, 0);
 
 				if (len == 0) { 
@@ -311,8 +316,10 @@ do_repeater(LPVOID lpParam)
 			} else if ( 0 < len ) {
 				/* move data on to top of buffer */ 
 				viewerbuf_len -= len;
+
 				if( 0 < viewerbuf_len ) 
 					memcpy(viewerbuf, viewerbuf + len, viewerbuf_len);
+
 				assert(0 <= viewerbuf_len); 
 			}
 		}
@@ -320,6 +327,7 @@ do_repeater(LPVOID lpParam)
 		/* flush data in serverbuffer to viewer */
 		if( 0 < serverbuf_len ) { 
 			len = send(slot->viewer, serverbuf, serverbuf_len, 0);
+
 			if( len == -1 ) {
 #ifdef WIN32
 				errno = WSAGetLastError();
@@ -332,8 +340,10 @@ do_repeater(LPVOID lpParam)
 			} else if ( 0 < len ) {
 				/* move data on to top of buffer */ 
 				serverbuf_len -= len;
+
 				if( len < (int)serverbuf_len )
 					memcpy(serverbuf, serverbuf + len, serverbuf_len);
+
 				assert(0 <= serverbuf_len); 
 			}
 		}
@@ -950,7 +960,7 @@ int main(int argc, char **argv)
 
 	// Start multithreading...
 	// Initialize MutEx
-	t_result = mutex_init( &mutex_slots, NULL );
+	t_result = mutex_init( &mutex_slots );
 	if( t_result != 0 ) {
 #ifndef _DEBUG
 		error("Failed to create mutex with error: %d\n", t_result );
