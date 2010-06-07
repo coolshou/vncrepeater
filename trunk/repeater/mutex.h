@@ -33,7 +33,7 @@
 
 /* Prototypes */
 int mutex_destroy( mutex_t * mutex );
-int mutex_init(mutex_t * mutex, mutexattr_t * attr);
+int mutex_init(mutex_t * mutex);
 int mutex_lock( mutex_t * mutex);
 int mutex_unlock( mutex_t * mutex );
 

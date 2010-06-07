@@ -43,20 +43,29 @@ mutex_destroy( mutex_t * mutex)
 
 
 int
-mutex_init(mutex_t * mutex, mutexattr_t * attr)
+mutex_init( mutex_t * mutex )
 {
 #ifdef WIN32
-	if( attr == NULL )
-		*mutex = (mutex_t)CreateMutex( NULL, FALSE, NULL);
-	else
-		*mutex = (mutex_t)CreateMutex( *attr, FALSE, NULL);
-
+	*mutex = (mutex_t)CreateMutex( NULL, FALSE, NULL);
+	
 	if( *mutex == NULL )
 		return GetLastError();
 	else
 		return 0;
 #else
-	return pthread_mutex_init( mutex, attr );
+	int retVal;
+	pthread_mutexattr_t mutexattr;
+
+	// Set the mutex as a recursive mutex
+	pthread_mutexattr_settype(&mutexattr, PTHREAD_MUTEX_RECURSIVE_NP);
+
+	// Create the mutex with the attributes set
+	retVal = pthread_mutex_init( mutex, &mutexattr );
+
+	// Destroy the attribute
+	pthread_mutexattr_destroy( &mutexattr );
+
+	return retVal;
 #endif
 }
 
