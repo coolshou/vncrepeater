@@ -241,6 +241,7 @@ AddSlot(repeaterslot *slot)
 			return Slots;
 		} else if( current->server == INVALID_SOCKET ) {
 			current->server = slot->server;
+			current->code = slot->code;
 		} else if( current->viewer == INVALID_SOCKET ) {
 			current->viewer = slot->viewer;
 		} else {
