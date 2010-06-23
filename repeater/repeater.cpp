@@ -142,11 +142,12 @@ void report_bytes(char *prefix, char *buf, int len)
  *
  *****************************************************************************/
 
-int ParseDisplay(char *display, char *phost, int hostlen, unsigned char *pport) 
+int ParseDisplay(char *display, char *phost, int hostlen, int *pport, unsigned char *challengedid) 
 {
 	unsigned char challenge[CHALLENGESIZE];
 	char tmp_id[MAX_HOST_NAME_LEN + 1];
 	char *colonpos = strchr(display, ':');
+	int tmp_code;
 
 	if( hostlen < (int)strlen(display) ) return FALSE;
 
@@ -156,13 +157,15 @@ int ParseDisplay(char *display, char *phost, int hostlen, unsigned char *pport)
 	phost[colonpos - display]  = '\0';
 
 	memset(&tmp_id, 0, sizeof(tmp_id));
-	if( sscanf(colonpos + 1, "%s", tmp_id) != 1 ) return FALSE;
+	if( sscanf(colonpos + 1, "%d", &tmp_code) != 1 ) return FALSE;
+	if( sscanf(colonpos + 1, "%s", &tmp_id) != 1 ) return FALSE;
 
 	// encrypt
 	memcpy(&challenge, challenge_key, CHALLENGESIZE);
 	vncEncryptBytes(challenge, tmp_id);
 
-	memcpy((unsigned char *)pport, challenge, CHALLENGESIZE);
+	memcpy((unsigned char *)challengedid, challenge, CHALLENGESIZE);
+	*pport = tmp_code;
 	return TRUE;
 }
 
@@ -204,7 +207,7 @@ do_repeater(LPVOID lpParam)
 	tm.tv_sec= 0;
 	tm.tv_usec = 50;
 
-	debug("do_reapeater(): Starting repeater for ID %s.\n", slot->challenge);
+	debug("do_reapeater(): Starting repeater for ID %lu.\n", slot->code);
 
 	// Send ClientInit to the server to start repeating
 	client_init = 1;
@@ -369,6 +372,7 @@ server_listen(LPVOID lpParam)
 	char phost[MAX_HOST_NAME_LEN + 1];
 	CARD32 auth_type;
 	unsigned char challenge[CHALLENGESIZE];
+	unsigned long code;
 	repeaterslot *slot;
 	repeaterslot *current;
 	char * ip_addr;
@@ -418,19 +422,19 @@ server_listen(LPVOID lpParam)
 				socket_close( connection ); 
 				continue;
 			}
-#ifdef _DEBUG
-			else {
-				debug("Server (socket=%d) sent the host id:%s.\n", connection, host_id );
-			}
-#endif
 
 			// Check and cypher the ID
 			memset((char *)&challenge, 0, CHALLENGESIZE);
-			if( ParseDisplay(host_id, phost, MAX_HOST_NAME_LEN, (unsigned char *)&challenge) == FALSE ) {
+			if( ParseDisplay(host_id, phost, MAX_HOST_NAME_LEN, (int *)&code, (unsigned char *)&challenge) == FALSE ) {
 				debug("server_listen(): Reading Proxy settings error");
 				socket_close( connection ); 
 				continue;
 			}
+#ifdef _DEBUG
+			else {
+				debug("Server (socket=%d) sent the host ID:%lu.\n", connection, code );
+			}
+#endif
 
 			// Continue with the handshake until ClientInit.
 			// Read the Protocol Version
@@ -533,6 +537,7 @@ server_listen(LPVOID lpParam)
 			slot->viewer = INVALID_SOCKET;
 			slot->timestamp = (unsigned long)time(NULL);
 			memcpy(slot->challenge, challenge, CHALLENGESIZE);
+			slot->code = code;
 			slot->next = NULL;
 			
 			current = AddSlot(slot);
