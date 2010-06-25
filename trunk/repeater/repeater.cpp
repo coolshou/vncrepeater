@@ -158,7 +158,7 @@ int ParseDisplay(char *display, char *phost, int hostlen, int *pport, unsigned c
 
 	memset(&tmp_id, 0, sizeof(tmp_id));
 	if( sscanf(colonpos + 1, "%d", &tmp_code) != 1 ) return FALSE;
-	if( sscanf(colonpos + 1, "%s", &tmp_id) != 1 ) return FALSE;
+	if( sscanf(colonpos + 1, "%s", (char *)&tmp_id) != 1 ) return FALSE;
 
 	// encrypt
 	memcpy(&challenge, challenge_key, CHALLENGESIZE);
