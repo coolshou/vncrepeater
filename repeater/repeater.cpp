@@ -37,7 +37,7 @@
 #ifndef WIN32
 #include <string.h>
 #include <pthread.h>
-#include <linux/tcp.h>	/* u_short */
+#include <netinet/tcp.h>	/* u_short */
 #include <unistd.h>
 #endif
 
